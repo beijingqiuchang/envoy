@@ -21,7 +21,6 @@ envoy_extension_cc_test(
         "//test/mocks/event:event_mocks",
         "//test/mocks/network:network_mocks",
         "//test/mocks/server:server_mocks",
-        "@envoy_api//envoy/config/transport_socket/alts/v2alpha:pkg_cc_proto",
     ],
 )
 
@@ -77,6 +76,7 @@ envoy_extension_cc_test(
     external_deps = [
         "grpc_alts_fake_handshaker_server",
     ],
+    tags = ["fails_on_windows"],
     deps = [
         "//source/common/common:utility_lib",
         "//source/common/event:dispatcher_includes",

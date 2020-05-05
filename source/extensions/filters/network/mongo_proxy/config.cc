@@ -1,6 +1,9 @@
 #include "extensions/filters/network/mongo_proxy/config.h"
 
-#include "envoy/config/filter/network/mongo_proxy/v2/mongo_proxy.pb.validate.h"
+#include <memory>
+
+#include "envoy/extensions/filters/network/mongo_proxy/v3/mongo_proxy.pb.h"
+#include "envoy/extensions/filters/network/mongo_proxy/v3/mongo_proxy.pb.validate.h"
 #include "envoy/network/connection.h"
 #include "envoy/registry/registry.h"
 
@@ -14,7 +17,7 @@ namespace NetworkFilters {
 namespace MongoProxy {
 
 Network::FilterFactoryCb MongoProxyFilterConfigFactory::createFilterFactoryFromProtoTyped(
-    const envoy::config::filter::network::mongo_proxy::v2::MongoProxy& proto_config,
+    const envoy::extensions::filters::network::mongo_proxy::v3::MongoProxy& proto_config,
     Server::Configuration::FactoryContext& context) {
 
   ASSERT(!proto_config.stat_prefix().empty());
@@ -22,8 +25,8 @@ Network::FilterFactoryCb MongoProxyFilterConfigFactory::createFilterFactoryFromP
   const std::string stat_prefix = fmt::format("mongo.{}", proto_config.stat_prefix());
   AccessLogSharedPtr access_log;
   if (!proto_config.access_log().empty()) {
-    access_log.reset(new AccessLog(proto_config.access_log(), context.accessLogManager(),
-                                   context.dispatcher().timeSource()));
+    access_log = std::make_shared<AccessLog>(proto_config.access_log(), context.accessLogManager(),
+                                             context.dispatcher().timeSource());
   }
 
   Filters::Common::Fault::FaultDelayConfigSharedPtr fault_config;
@@ -45,7 +48,7 @@ Network::FilterFactoryCb MongoProxyFilterConfigFactory::createFilterFactoryFromP
  * Static registration for the mongo filter. @see RegisterFactory.
  */
 REGISTER_FACTORY(MongoProxyFilterConfigFactory,
-                 Server::Configuration::NamedNetworkFilterConfigFactory);
+                 Server::Configuration::NamedNetworkFilterConfigFactory){"envoy.mongo_proxy"};
 
 } // namespace MongoProxy
 } // namespace NetworkFilters

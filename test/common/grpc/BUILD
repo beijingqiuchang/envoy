@@ -21,6 +21,7 @@ envoy_cc_test(
         "//test/mocks/upstream:upstream_mocks",
         "//test/proto:helloworld_proto_cc_proto",
         "//test/test_common:test_time_lib",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
     ],
 )
 
@@ -34,6 +35,7 @@ envoy_cc_test(
         "//test/mocks/thread_local:thread_local_mocks",
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
     ],
 )
 
@@ -131,6 +133,7 @@ envoy_cc_test_library(
         "//source/common/common:assert_lib",
         "//test/mocks/secret:secret_mocks",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
     ],
 )
 
@@ -150,12 +153,16 @@ envoy_cc_test_library(
         "//test/test_common:global_lib",
         "//test/test_common:test_time_lib",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/transport_sockets/tls/v3:pkg_cc_proto",
     ],
 )
 
 envoy_cc_test(
     name = "grpc_client_integration_test",
     srcs = ["grpc_client_integration_test.cc"],
+    # Fails on windows; Connection is terminated early testing BasicStream/IPv4_EnvoyGrpc
+    tags = ["fails_on_windows"],
     deps = [
         ":grpc_client_integration_test_harness_lib",
         "//source/common/grpc:async_client_lib",
@@ -170,6 +177,6 @@ envoy_cc_test_library(
     data = ["//test/config/integration/certs"],
     deps = [
         "//test/test_common:environment_lib",
-        "@envoy_api//envoy/api/v2/core:pkg_cc_proto",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
     ],
 )

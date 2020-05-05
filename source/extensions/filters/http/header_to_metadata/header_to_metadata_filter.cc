@@ -1,7 +1,10 @@
 #include "extensions/filters/http/header_to_metadata/header_to_metadata_filter.h"
 
+#include "envoy/extensions/filters/http/header_to_metadata/v3/header_to_metadata.pb.h"
+
 #include "common/common/base64.h"
 #include "common/config/well_known_names.h"
+#include "common/http/utility.h"
 #include "common/protobuf/protobuf.h"
 
 #include "extensions/filters/http/well_known_names.h"
@@ -14,13 +17,18 @@ namespace Extensions {
 namespace HttpFilters {
 namespace HeaderToMetadataFilter {
 
-Config::Config(const envoy::config::filter::http::header_to_metadata::v2::Config config) {
+Config::Config(const envoy::extensions::filters::http::header_to_metadata::v3::Config config,
+               const bool per_route) {
   request_set_ = Config::configToVector(config.request_rules(), request_rules_);
   response_set_ = Config::configToVector(config.response_rules(), response_rules_);
 
-  // don't allow an empty configuration
-  if (!response_set_ && !request_set_) {
-    throw new EnvoyException("Must at least specify either response or request config");
+  // Note: empty configs are fine for the global config, which would be the case for enabling
+  //       the filter globally without rules and then applying them at the virtual host or
+  //       route level. At the virtual or route level, it makes no sense to have an empty
+  //       config so we throw an error.
+  if (per_route && !response_set_ && !request_set_) {
+    throw EnvoyException("header_to_metadata_filter: Per filter configs must at least specify "
+                         "either request or response rules");
   }
 }
 
@@ -52,9 +60,11 @@ HeaderToMetadataFilter::HeaderToMetadataFilter(const ConfigSharedPtr config) : c
 
 HeaderToMetadataFilter::~HeaderToMetadataFilter() = default;
 
-Http::FilterHeadersStatus HeaderToMetadataFilter::decodeHeaders(Http::HeaderMap& headers, bool) {
-  if (config_->doRequest()) {
-    writeHeaderToMetadata(headers, config_->requestRules(), *decoder_callbacks_);
+Http::FilterHeadersStatus HeaderToMetadataFilter::decodeHeaders(Http::RequestHeaderMap& headers,
+                                                                bool) {
+  const auto* config = getConfig();
+  if (config->doRequest()) {
+    writeHeaderToMetadata(headers, config->requestRules(), *decoder_callbacks_);
   }
 
   return Http::FilterHeadersStatus::Continue;
@@ -65,9 +75,11 @@ void HeaderToMetadataFilter::setDecoderFilterCallbacks(
   decoder_callbacks_ = &callbacks;
 }
 
-Http::FilterHeadersStatus HeaderToMetadataFilter::encodeHeaders(Http::HeaderMap& headers, bool) {
-  if (config_->doResponse()) {
-    writeHeaderToMetadata(headers, config_->responseRules(), *encoder_callbacks_);
+Http::FilterHeadersStatus HeaderToMetadataFilter::encodeHeaders(Http::ResponseHeaderMap& headers,
+                                                                bool) {
+  const auto* config = getConfig();
+  if (config->doResponse()) {
+    writeHeaderToMetadata(headers, config->responseRules(), *encoder_callbacks_);
   }
   return Http::FilterHeadersStatus::Continue;
 }
@@ -95,7 +107,7 @@ bool HeaderToMetadataFilter::addMetadata(StructMap& map, const std::string& meta
   }
 
   std::string decodedValue = std::string(value);
-  if (encode == envoy::config::filter::http::header_to_metadata::v2::Config_ValueEncode_BASE64) {
+  if (encode == envoy::extensions::filters::http::header_to_metadata::v3::Config::BASE64) {
     decodedValue = Base64::decodeWithoutPadding(value);
     if (decodedValue.empty()) {
       ENVOY_LOG(debug, "Base64 decode failed");
@@ -105,10 +117,10 @@ bool HeaderToMetadataFilter::addMetadata(StructMap& map, const std::string& meta
 
   // Sane enough, add the key/value.
   switch (type) {
-  case envoy::config::filter::http::header_to_metadata::v2::Config_ValueType_STRING:
+  case envoy::extensions::filters::http::header_to_metadata::v3::Config::STRING:
     val.set_string_value(std::move(decodedValue));
     break;
-  case envoy::config::filter::http::header_to_metadata::v2::Config_ValueType_NUMBER: {
+  case envoy::extensions::filters::http::header_to_metadata::v3::Config::NUMBER: {
     double dval;
     if (absl::SimpleAtod(StringUtil::trim(decodedValue), &dval)) {
       val.set_number_value(dval);
@@ -118,7 +130,7 @@ bool HeaderToMetadataFilter::addMetadata(StructMap& map, const std::string& meta
     }
     break;
   }
-  case envoy::config::filter::http::header_to_metadata::v2::Config_ValueType_PROTOBUF_VALUE: {
+  case envoy::extensions::filters::http::header_to_metadata::v3::Config::PROTOBUF_VALUE: {
     if (!val.ParseFromString(decodedValue)) {
       ENVOY_LOG(debug, "parse from decoded string failed");
       return false;
@@ -193,6 +205,23 @@ void HeaderToMetadataFilter::writeHeaderToMetadata(Http::HeaderMap& headers,
       callbacks.streamInfo().setDynamicMetadata(entry.first, entry.second);
     }
   }
+}
+
+// TODO(rgs1): this belongs in one of the filter interfaces, see issue #10164.
+const Config* HeaderToMetadataFilter::getConfig() const {
+  // Cached config pointer.
+  if (effective_config_) {
+    return effective_config_;
+  }
+
+  effective_config_ = Http::Utility::resolveMostSpecificPerFilterConfig<Config>(
+      HttpFilterNames::get().HeaderToMetadata, decoder_callbacks_->route());
+  if (effective_config_) {
+    return effective_config_;
+  }
+
+  effective_config_ = config_.get();
+  return effective_config_;
 }
 
 } // namespace HeaderToMetadataFilter

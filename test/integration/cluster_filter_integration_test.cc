@@ -1,8 +1,9 @@
+#include "envoy/config/bootstrap/v3/bootstrap.pb.h"
 #include "envoy/network/filter.h"
-#include "envoy/registry/registry.h"
 
 #include "test/config/utility.h"
 #include "test/integration/integration.h"
+#include "test/test_common/registry.h"
 
 #include "gtest/gtest.h"
 
@@ -69,22 +70,18 @@ public:
     return std::make_unique<ProtobufWkt::StringValue>();
   }
 
-  std::string name() override { return "envoy.upstream.polite"; }
+  std::string name() const override { return "envoy.upstream.polite"; }
 };
-
-// perform static registration
-REGISTER_FACTORY(PoliteFilterConfigFactory,
-                 Server::Configuration::NamedUpstreamNetworkFilterConfigFactory);
 
 class ClusterFilterIntegrationTest : public testing::TestWithParam<Network::Address::IpVersion>,
                                      public BaseIntegrationTest {
 public:
   ClusterFilterIntegrationTest()
-      : BaseIntegrationTest(GetParam(), ConfigHelper::TCP_PROXY_CONFIG) {}
+      : BaseIntegrationTest(GetParam(), ConfigHelper::tcpProxyConfig()), registration_(factory_) {}
 
   void initialize() override {
     enable_half_close_ = true;
-    config_helper_.addConfigModifier([](envoy::config::bootstrap::v2::Bootstrap& bootstrap) {
+    config_helper_.addConfigModifier([](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
       auto* cluster_0 = bootstrap.mutable_static_resources()->mutable_clusters(0);
       auto* filter = cluster_0->add_filters();
       filter->set_name("envoy.upstream.polite");
@@ -94,6 +91,10 @@ public:
     });
     BaseIntegrationTest::initialize();
   }
+
+  PoliteFilterConfigFactory factory_;
+  Registry::InjectFactory<Server::Configuration::NamedUpstreamNetworkFilterConfigFactory>
+      registration_;
 };
 
 INSTANTIATE_TEST_SUITE_P(IpVersions, ClusterFilterIntegrationTest,

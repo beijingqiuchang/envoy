@@ -23,9 +23,10 @@ envoy_cc_extension(
         "//source/common/grpc:codec_lib",
         "//source/common/grpc:common_lib",
         "//source/common/grpc:context_lib",
+        "//source/common/runtime:runtime_lib",
         "//source/extensions/filters/http:well_known_names",
         "//source/extensions/filters/http/common:factory_base_lib",
         "//source/extensions/filters/http/common:pass_through_filter_lib",
-        "@envoy_api//envoy/config/filter/http/grpc_stats/v2alpha:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/grpc_stats/v3:pkg_cc_proto",
     ],
 )

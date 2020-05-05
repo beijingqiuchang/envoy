@@ -31,11 +31,12 @@ private:
 class EnvoyQuicAlarmTest : public ::testing::Test {
 public:
   EnvoyQuicAlarmTest()
-      : api_(Api::createApiForTest(time_system_)), dispatcher_(api_->allocateDispatcher()),
-        clock_(*dispatcher_), alarm_factory_(*dispatcher_, clock_) {}
+      : api_(Api::createApiForTest(time_system_)),
+        dispatcher_(api_->allocateDispatcher("test_thread")), clock_(*dispatcher_),
+        alarm_factory_(*dispatcher_, clock_) {}
 
   void advanceMsAndLoop(int64_t delay_ms) {
-    time_system_.sleep(std::chrono::milliseconds(delay_ms));
+    time_system_.advanceTimeAsync(std::chrono::milliseconds(delay_ms));
     dispatcher_->run(Dispatcher::RunType::NonBlock);
   }
 
@@ -187,6 +188,18 @@ TEST_F(EnvoyQuicAlarmTest, CancelActiveAlarm) {
   alarm->Cancel();
   dispatcher_->run(Dispatcher::RunType::NonBlock);
   EXPECT_FALSE(unowned_delegate->fired());
+}
+
+TEST_F(EnvoyQuicAlarmTest, CancelUponDestruction) {
+  auto unowned_delegate = new TestDelegate();
+  quic::QuicAlarm* alarm = alarm_factory_.CreateAlarm(unowned_delegate);
+  // alarm becomes active upon Set().
+  alarm->Set(clock_.Now() + QuicTime::Delta::FromMilliseconds(10));
+  // delegate should be destroyed with alarm.
+  delete alarm;
+  // alarm firing callback should have been cancelled, otherwise the delegate
+  // would be used after free.
+  advanceMsAndLoop(10);
 }
 
 } // namespace Quic

@@ -19,9 +19,9 @@ Policy
 ------
 
 The RBAC filter checks the request based on a list of
-:ref:`policies <envoy_api_field_config.rbac.v2.RBAC.policies>`. A policy consists of a list of
-:ref:`permissions <envoy_api_msg_config.rbac.v2.Permission>` and
-:ref:`principals <envoy_api_msg_config.rbac.v2.Principal>`. The permission specifies the actions of
+:ref:`policies <envoy_v3_api_field_config.rbac.v3.RBAC.policies>`. A policy consists of a list of
+:ref:`permissions <envoy_v3_api_msg_config.rbac.v3.Permission>` and
+:ref:`principals <envoy_v3_api_msg_config.rbac.v3.Principal>`. The permission specifies the actions of
 the request, for example, the method and path of a HTTP request. The principal specifies the
 downstream client identities of the request, for example, the URI SAN of the downstream client
 certificate. A policy is matched if its permissions and principals are matched at the same time.
@@ -30,7 +30,7 @@ Shadow Policy
 -------------
 
 The filter can be configured with a
-:ref:`shadow policy <envoy_api_field_config.filter.http.rbac.v2.RBAC.shadow_rules>` that doesn't
+:ref:`shadow policy <envoy_v3_api_field_extensions.filters.http.rbac.v3.RBAC.shadow_rules>` that doesn't
 have any effect (i.e. not deny the request) but only emit stats and log the result. This is useful
 for testing a rule before applying in production.
 
@@ -77,10 +77,13 @@ The following attributes are exposed to the language runtime:
    request.id, string, Request ID
    request.size, int, Size of the request body
    request.total_size, int, Total size of the request including the headers
+   request.protocol, string, Request protocol e.g. "HTTP/2"
    response.code, int, Response HTTP status code
+   response.grpc_status, int, Response gRPC status code
    response.headers, string map, All response headers
    response.trailers, string map, All response trailers
    response.size, int, Size of the response body
+   response.total_size, int, Total size of the response including the approximate uncompressed size of the headers and the trailers
    response.flags, int, Additional details about the response beyond the standard response code
    source.address, string, Downstream connection remote address
    source.port, int, Downstream connection remote port

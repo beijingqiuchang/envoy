@@ -4,8 +4,8 @@ gRPC-JSON transcoder
 ====================
 
 * gRPC :ref:`architecture overview <arch_overview_grpc>`
-* :ref:`v2 API reference <envoy_api_msg_config.filter.http.transcoder.v2.GrpcJsonTranscoder>`
-* This filter should be configured with the name *envoy.grpc_json_transcoder*.
+* :ref:`v3 API reference <envoy_v3_api_msg_extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder>`
+* This filter should be configured with the name *envoy.filters.http.grpc_json_transcoder*.
 
 This is a filter which allows a RESTful JSON API client to send requests to Envoy over HTTP
 and get proxied to a gRPC service. The HTTP mapping for the gRPC service has to be defined by
@@ -82,7 +82,10 @@ as its output message type. The implementation needs to set
 (which sets the value of the HTTP response `Content-Type` header) and
 `data <https://github.com/googleapis/googleapis/blob/master/google/api/httpbody.proto#L71>`_
 (which sets the HTTP response body) accordingly.
-
+Multiple `google.api.HttpBody <https://github.com/googleapis/googleapis/blob/master/google/api/httpbody.proto>`_
+can be send by the gRPC server in the server streaming case.
+In this case, HTTP response header `Content-Type` will use the `content-type` from the first
+`google.api.HttpBody <https://github.com/googleapis/googleapis/blob/master/google/api/httpbody.proto>`.
 
 Sample Envoy configuration
 --------------------------
@@ -105,9 +108,9 @@ gRPC or RESTful JSON requests to localhost:51051.
         socket_address: { address: 0.0.0.0, port_value: 51051 }
       filter_chains:
       - filters:
-        - name: envoy.http_connection_manager
+        - name: envoy.filters.network.http_connection_manager
           typed_config:
-            "@type": type.googleapis.com/envoy.config.filter.network.http_connection_manager.v2.HttpConnectionManager
+            "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
             stat_prefix: grpc_json
             codec_type: AUTO
             route_config:
@@ -121,8 +124,9 @@ gRPC or RESTful JSON requests to localhost:51051.
                 - match: { prefix: "/helloworld.Greeter" }
                   route: { cluster: grpc, timeout: { seconds: 60 } }
             http_filters:
-            - name: envoy.grpc_json_transcoder
-              config:
+            - name: envoy.filters.http.grpc_json_transcoder
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder
                 proto_descriptor: "/tmp/envoy/proto.pb"
                 services: ["helloworld.Greeter"]
                 print_options:
@@ -130,7 +134,7 @@ gRPC or RESTful JSON requests to localhost:51051.
                   always_print_primitive_fields: true
                   always_print_enums_as_ints: false
                   preserve_proto_field_names: false
-            - name: envoy.router
+            - name: envoy.filters.http.router
 
     clusters:
     - name: grpc

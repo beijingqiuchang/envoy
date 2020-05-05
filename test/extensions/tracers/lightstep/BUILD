@@ -17,13 +17,14 @@ envoy_extension_cc_test(
         "lightstep_tracer_impl_test.cc",
     ],
     extension_name = "envoy.tracers.lightstep",
+    # TODO(wrowe): envoy_extension_ rules don't currently exclude windows extensions
+    tags = ["skip_on_windows"],
     deps = [
         "//source/common/common:base64_lib",
         "//source/common/http:header_map_lib",
         "//source/common/http:headers_lib",
         "//source/common/http:message_lib",
         "//source/common/runtime:runtime_lib",
-        "//source/common/runtime:uuid_util_lib",
         "//source/common/stats:fake_symbol_table_lib",
         "//source/extensions/tracers/lightstep:lightstep_tracer_lib",
         "//test/mocks/http:http_mocks",
@@ -35,6 +36,7 @@ envoy_extension_cc_test(
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:global_lib",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/trace/v3:pkg_cc_proto",
     ],
 )
 
@@ -42,9 +44,12 @@ envoy_extension_cc_test(
     name = "config_test",
     srcs = ["config_test.cc"],
     extension_name = "envoy.tracers.lightstep",
+    # TODO(wrowe): envoy_extension_ rules don't currently exclude windows extensions
+    tags = ["skip_on_windows"],
     deps = [
         "//source/extensions/tracers/lightstep:config",
         "//test/mocks/server:server_mocks",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/trace/v3:pkg_cc_proto",
     ],
 )

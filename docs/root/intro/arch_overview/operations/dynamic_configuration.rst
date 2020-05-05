@@ -13,14 +13,14 @@ overview of the options currently available.
 
 * Top level configuration :ref:`reference <config>`.
 * :ref:`Reference configurations <install_ref_configs>`.
-* Envoy :ref:`v2 API overview <config_overview_v2>`.
-* :ref:`xDS API endpoints <config_overview_v2_management_server>`.
+* Envoy :ref:`v3 API overview <config_overview>`.
+* :ref:`xDS API endpoints <config_overview_management_server>`.
 
 Fully static
 ------------
 
 In a fully static configuration, the implementor provides a set of :ref:`listeners
-<config_listeners>` (and :ref:`filter chains <envoy_api_msg_listener.Filter>`), :ref:`clusters
+<config_listeners>` (and :ref:`filter chains <envoy_v3_api_msg_config.listener.v3.Filter>`), :ref:`clusters
 <config_cluster_manager>`, etc. Dynamic host discovery is only possible via DNS based
 :ref:`service discovery <arch_overview_service_discovery>`. Configuration reloads must take place
 via the built in :ref:`hot restart <arch_overview_hot_restart>` mechanism.
@@ -50,7 +50,7 @@ and remove clusters as specified by the API. This API allows implementors to bui
 which Envoy does not need to be aware of all upstream clusters at initial configuration time.
 Typically, when doing HTTP routing along with CDS (but without route discovery service),
 implementors will make use of the router's ability to forward requests to a cluster specified in an
-:ref:`HTTP request header <envoy_api_field_route.RouteAction.cluster_header>`.
+:ref:`HTTP request header <envoy_v3_api_field_config.route.v3.RouteAction.cluster_header>`.
 
 Although it is possible to use CDS without EDS by specifying fully static clusters, we recommend
 still using the EDS API for clusters specified via CDS. Internally, when a cluster definition is
@@ -69,6 +69,13 @@ runtime. The route configuration will be gracefully swapped in without affecting
 This API, when used alongside EDS and CDS, allows implementors to build a complex routing topology
 (:ref:`traffic shifting <config_http_conn_man_route_table_traffic_splitting>`, blue/green
 deployment, etc).
+
+VHDS
+----
+The :ref:`Virtual Host Discovery Service <config_http_conn_man_vhds>` allows the virtual hosts belonging
+to a route configuration to be requested as needed separately from the route configuration itself. This
+API is typically used in deployments in which there are a large number of virtual hosts in a route
+configuration.
 
 SRDS
 ----
@@ -111,7 +118,7 @@ EDS, CDS, etc. are each separate services, with different REST/gRPC service name
 StreamListeners, StreamSecrets. For users looking to enforce the order in which resources of
 different types reach Envoy, there is aggregated xDS, a single gRPC service that carries all
 resource types in a single gRPC stream. (ADS is only supported by gRPC).
-:ref:`More details about ADS <config_overview_v2_ads>`.
+:ref:`More details about ADS <config_overview_ads>`.
 
 .. _arch_overview_dynamic_config_delta:
 
@@ -122,4 +129,4 @@ Standard xDS is "state-of-the-world": every update must contain every resource, 
 a resource from an update implying that the resource is gone. Envoy supports a "delta" variant of
 xDS (including ADS), where updates only contain resources added/changed/removed. Delta xDS is a
 new protocol, with request/response APIs different from SotW.
-:ref:`More details about delta <config_overview_v2_delta>`.
+:ref:`More details about delta <config_overview_delta>`.

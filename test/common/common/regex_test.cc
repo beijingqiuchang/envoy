@@ -1,4 +1,5 @@
 #include "envoy/common/exception.h"
+#include "envoy/type/matcher/v3/regex.pb.h"
 
 #include "common/common/regex.h"
 
@@ -14,6 +15,9 @@ TEST(Utility, ParseStdRegex) {
   EXPECT_THROW_WITH_REGEX(Utility::parseStdRegex("(+invalid)"), EnvoyException,
                           "Invalid regex '\\(\\+invalid\\)': .+");
 
+  EXPECT_THROW_WITH_REGEX(Utility::parseStdRegexAsCompiledMatcher("(+invalid)"), EnvoyException,
+                          "Invalid regex '\\(\\+invalid\\)': .+");
+
   {
     std::regex regex = Utility::parseStdRegex("x*");
     EXPECT_NE(0, regex.flags() & std::regex::optimize);
@@ -24,11 +28,20 @@ TEST(Utility, ParseStdRegex) {
     EXPECT_NE(0, regex.flags() & std::regex::icase);
     EXPECT_EQ(0, regex.flags() & std::regex::optimize);
   }
+
+  {
+    // Regression test to cover high-complexity regular expressions that throw on std::regex_match.
+    // Note that not all std::regex_match implementations will throw when matching against the
+    // expression below, but at least clang 9.0.0 under linux does.
+    auto matcher = Utility::parseStdRegexAsCompiledMatcher(
+        "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||");
+    EXPECT_FALSE(matcher->match("0"));
+  }
 }
 
 TEST(Utility, ParseRegex) {
   {
-    envoy::type::matcher::RegexMatcher matcher;
+    envoy::type::matcher::v3::RegexMatcher matcher;
     matcher.mutable_google_re2();
     matcher.set_regex("(+invalid)");
     EXPECT_THROW_WITH_MESSAGE(Utility::parseRegex(matcher), EnvoyException,
@@ -37,7 +50,7 @@ TEST(Utility, ParseRegex) {
 
   // Regression test for https://github.com/envoyproxy/envoy/issues/7728
   {
-    envoy::type::matcher::RegexMatcher matcher;
+    envoy::type::matcher::v3::RegexMatcher matcher;
     matcher.mutable_google_re2();
     matcher.set_regex("/asdf/.*");
     const auto compiled_matcher = Utility::parseRegex(matcher);
@@ -47,12 +60,16 @@ TEST(Utility, ParseRegex) {
 
   // Verify max program size.
   {
-    envoy::type::matcher::RegexMatcher matcher;
+    envoy::type::matcher::v3::RegexMatcher matcher;
     matcher.mutable_google_re2()->mutable_max_program_size()->set_value(1);
     matcher.set_regex("/asdf/.*");
-    EXPECT_THROW_WITH_MESSAGE(Utility::parseRegex(matcher), EnvoyException,
-                              "regex '/asdf/.*' RE2 program size of 24 > max program size of 1. "
-                              "Increase configured max program size if necessary.");
+#ifndef GTEST_USES_SIMPLE_RE
+    EXPECT_THROW_WITH_REGEX(Utility::parseRegex(matcher), EnvoyException,
+                            "RE2 program size of [0-9]+ > max program size of 1\\.");
+#else
+    EXPECT_THROW_WITH_REGEX(Utility::parseRegex(matcher), EnvoyException,
+                            "RE2 program size of \\d+ > max program size of 1\\.");
+#endif
   }
 }
 

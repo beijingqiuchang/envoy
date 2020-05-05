@@ -1,5 +1,6 @@
 #pragma once
 
+#include <list>
 #include <string>
 
 #include "envoy/network/address.h"
@@ -100,6 +101,12 @@ Address::InstanceConstSharedPtr getAnyAddress(const Address::IpVersion version,
 bool supportsIpVersion(const Address::IpVersion version);
 
 /**
+ * Returns the DNS family for the specified IP version.
+ * @param version the IP version of the DNS lookup family.
+ */
+std::string ipVersionToDnsFamily(Network::Address::IpVersion version);
+
+/**
  * Bind a socket to a free port on a loopback address, and return the socket's fd and bound address.
  * Enables a test server to reliably "select" a port to listen on. Note that the socket option
  * SO_REUSEADDR has NOT been set on the socket.
@@ -162,10 +169,32 @@ const FilterChainSharedPtr createEmptyFilterChainWithRawBufferSockets();
 
 /**
  * Wrapper for Utility::readFromSocket() which reads a single datagram into the supplied
- * UdpRecvData without worrying about the packet processor interface.
+ * UdpRecvData without worrying about the packet processor interface. The function will
+ * instantiate the buffer returned in data.
  */
 Api::IoCallUint64Result readFromSocket(IoHandle& handle, const Address::Instance& local_address,
                                        UdpRecvData& data);
+
+/**
+ * A synchronous UDP peer that can be used for testing.
+ */
+class UdpSyncPeer {
+public:
+  UdpSyncPeer(Network::Address::IpVersion version);
+
+  // Writer a datagram to a remote peer.
+  void write(const std::string& buffer, const Network::Address::Instance& peer);
+
+  // Receive a datagram.
+  void recv(Network::UdpRecvData& datagram);
+
+  // Return the local peer's socket address.
+  const Network::Address::InstanceConstSharedPtr& localAddress() { return socket_->localAddress(); }
+
+private:
+  const Network::SocketPtr socket_;
+  std::list<Network::UdpRecvData> received_datagrams_;
+};
 
 } // namespace Test
 } // namespace Network

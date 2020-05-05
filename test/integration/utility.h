@@ -22,20 +22,22 @@ namespace Envoy {
 /**
  * A buffering response decoder used for testing.
  */
-class BufferingStreamDecoder : public Http::StreamDecoder, public Http::StreamCallbacks {
+class BufferingStreamDecoder : public Http::ResponseDecoder, public Http::StreamCallbacks {
 public:
   BufferingStreamDecoder(std::function<void()> on_complete_cb) : on_complete_cb_(on_complete_cb) {}
 
   bool complete() { return complete_; }
-  const Http::HeaderMap& headers() { return *headers_; }
+  const Http::ResponseHeaderMap& headers() { return *headers_; }
   const std::string& body() { return body_; }
 
   // Http::StreamDecoder
-  void decode100ContinueHeaders(Http::HeaderMapPtr&&) override {}
-  void decodeHeaders(Http::HeaderMapPtr&& headers, bool end_stream) override;
   void decodeData(Buffer::Instance&, bool end_stream) override;
-  void decodeTrailers(Http::HeaderMapPtr&& trailers) override;
   void decodeMetadata(Http::MetadataMapPtr&&) override {}
+
+  // Http::ResponseDecoder
+  void decode100ContinueHeaders(Http::ResponseHeaderMapPtr&&) override {}
+  void decodeHeaders(Http::ResponseHeaderMapPtr&& headers, bool end_stream) override;
+  void decodeTrailers(Http::ResponseTrailerMapPtr&& trailers) override;
 
   // Http::StreamCallbacks
   void onResetStream(Http::StreamResetReason reason,
@@ -46,7 +48,7 @@ public:
 private:
   void onComplete();
 
-  Http::HeaderMapPtr headers_;
+  Http::ResponseHeaderMapPtr headers_;
   std::string body_;
   bool complete_{};
   std::function<void()> on_complete_cb_;
@@ -62,15 +64,19 @@ public:
   using ReadCallback = std::function<void(Network::ClientConnection&, const Buffer::Instance&)>;
 
   RawConnectionDriver(uint32_t port, Buffer::Instance& initial_data, ReadCallback data_callback,
-                      Network::Address::IpVersion version);
+                      Network::Address::IpVersion version, Event::Dispatcher& dispatcher,
+                      Network::TransportSocketPtr transport_socket = nullptr);
   ~RawConnectionDriver();
   const Network::Connection& connection() { return *client_; }
-  bool connecting() { return callbacks_->connecting_; }
   void run(Event::Dispatcher::RunType run_type = Event::Dispatcher::RunType::Block);
   void close();
-  Network::ConnectionEvent last_connection_event() const {
+  Network::ConnectionEvent lastConnectionEvent() const {
     return callbacks_->last_connection_event_;
   }
+  // Wait until connected or closed().
+  void waitForConnection();
+
+  bool closed() { return callbacks_->closed(); }
 
 private:
   struct ForwardingFilter : public Network::ReadFilterBaseImpl {
@@ -89,20 +95,30 @@ private:
   };
 
   struct ConnectionCallbacks : public Network::ConnectionCallbacks {
+
+    bool connected() const { return connected_; }
+    bool closed() const { return closed_; }
+
+    // Network::ConnectionCallbacks
     void onEvent(Network::ConnectionEvent event) override {
       last_connection_event_ = event;
-      connecting_ = false;
+      closed_ |= (event == Network::ConnectionEvent::RemoteClose ||
+                  event == Network::ConnectionEvent::LocalClose);
+      connected_ |= (event == Network::ConnectionEvent::Connected);
     }
     void onAboveWriteBufferHighWatermark() override {}
     void onBelowWriteBufferLowWatermark() override {}
 
-    bool connecting_{true};
     Network::ConnectionEvent last_connection_event_;
+
+  private:
+    bool connected_{false};
+    bool closed_{false};
   };
 
   Stats::IsolatedStoreImpl stats_store_;
   Api::ApiPtr api_;
-  Event::DispatcherPtr dispatcher_;
+  Event::Dispatcher& dispatcher_;
   std::unique_ptr<ConnectionCallbacks> callbacks_;
   Network::ClientConnectionPtr client_;
 };

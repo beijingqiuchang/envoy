@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "envoy/api/v2/discovery.pb.h"
 #include "envoy/common/exception.h"
 #include "envoy/common/pure.h"
+#include "envoy/service/discovery/v3/discovery.pb.h"
 #include "envoy/stats/stats_macros.h"
 
 #include "common/protobuf/protobuf.h"
@@ -49,10 +49,10 @@ public:
    * @throw EnvoyException with reason if the config changes are rejected. Otherwise the changes
    *        are accepted. Accepted changes have their version_info reflected in subsequent requests.
    */
-  virtual void
-  onConfigUpdate(const Protobuf::RepeatedPtrField<envoy::api::v2::Resource>& added_resources,
-                 const Protobuf::RepeatedPtrField<std::string>& removed_resources,
-                 const std::string& system_version_info) PURE;
+  virtual void onConfigUpdate(
+      const Protobuf::RepeatedPtrField<envoy::service::discovery::v3::Resource>& added_resources,
+      const Protobuf::RepeatedPtrField<std::string>& removed_resources,
+      const std::string& system_version_info) PURE;
 
   /**
    * Called when either the Subscription is unable to fetch a config update or when onConfigUpdate
@@ -97,19 +97,22 @@ using SubscriptionPtr = std::unique_ptr<Subscription>;
 /**
  * Per subscription stats. @see stats_macros.h
  */
-#define ALL_SUBSCRIPTION_STATS(COUNTER, GAUGE)                                                     \
+#define ALL_SUBSCRIPTION_STATS(COUNTER, GAUGE, TEXT_READOUT)                                       \
   COUNTER(init_fetch_timeout)                                                                      \
   COUNTER(update_attempt)                                                                          \
   COUNTER(update_failure)                                                                          \
   COUNTER(update_rejected)                                                                         \
   COUNTER(update_success)                                                                          \
-  GAUGE(version, NeverImport)
+  GAUGE(update_time, NeverImport)                                                                  \
+  GAUGE(version, NeverImport)                                                                      \
+  TEXT_READOUT(version_text)
 
 /**
  * Struct definition for per subscription stats. @see stats_macros.h
  */
 struct SubscriptionStats {
-  ALL_SUBSCRIPTION_STATS(GENERATE_COUNTER_STRUCT, GENERATE_GAUGE_STRUCT)
+  ALL_SUBSCRIPTION_STATS(GENERATE_COUNTER_STRUCT, GENERATE_GAUGE_STRUCT,
+                         GENERATE_TEXT_READOUT_STRUCT)
 };
 
 } // namespace Config
