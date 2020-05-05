@@ -7,6 +7,7 @@
 namespace Envoy {
 namespace Server {
 
+// DispatcherImpl
 void WatchDogImpl::startWatchdog(Event::Dispatcher& dispatcher) {
   timer_ = dispatcher.createTimer([this]() -> void {
     this->touch();

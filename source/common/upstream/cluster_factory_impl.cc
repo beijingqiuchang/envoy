@@ -34,7 +34,7 @@ std::pair<ClusterSharedPtr, ThreadAwareLoadBalancerPtr> ClusterFactoryImplBase::
   if (!cluster.has_cluster_type()) {
     switch (cluster.type()) {
     case envoy::api::v2::Cluster::STATIC:
-      cluster_type = Extensions::Clusters::ClusterTypes::get().Static;
+      cluster_type = Extensions::Clusters::ClusterTypes::get().Static;  // StaticClusterFactory
       break;
     case envoy::api::v2::Cluster::STRICT_DNS:
       cluster_type = Extensions::Clusters::ClusterTypes::get().StrictDns;
@@ -54,6 +54,7 @@ std::pair<ClusterSharedPtr, ThreadAwareLoadBalancerPtr> ClusterFactoryImplBase::
   } else {
     cluster_type = cluster.cluster_type().name();
   }
+  // factory 是 EdsClusterFactory
   ClusterFactory* factory = Registry::FactoryRegistry<ClusterFactory>::getFactory(cluster_type);
 
   if (factory == nullptr) {
@@ -65,6 +66,8 @@ std::pair<ClusterSharedPtr, ThreadAwareLoadBalancerPtr> ClusterFactoryImplBase::
       cluster_manager, stats, tls, std::move(dns_resolver), ssl_context_manager, runtime, random,
       dispatcher, log_manager, local_info, admin, singleton_manager,
       std::move(outlier_event_logger), added_via_api, validation_visitor, api);
+  // 根据类型，生成不同的类型：StaticClusterImpl
+  // <EdsClusterImpl, nullptr>
   return factory->create(cluster, context);
 }
 
@@ -99,6 +102,8 @@ ClusterFactoryImplBase::create(const envoy::api::v2::Cluster& cluster,
       context.localInfo(), context.dispatcher(), context.random(), context.stats(),
       context.singletonManager(), context.tls(), context.messageValidationVisitor(), context.api());
 
+  // 调用继承类的实现
+  // EdsClusterImpl
   std::pair<ClusterImplBaseSharedPtr, ThreadAwareLoadBalancerPtr> new_cluster_pair =
       createClusterImpl(cluster, context, factory_context, std::move(stats_scope));
 
@@ -107,6 +112,7 @@ ClusterFactoryImplBase::create(const envoy::api::v2::Cluster& cluster,
     if (cluster.health_checks().size() != 1) {
       throw EnvoyException("Multiple health checks not supported");
     } else {
+      // 先看ProdHttpHealthCheckerImpl这个的
       new_cluster_pair.first->setHealthChecker(HealthCheckerFactory::create(
           cluster.health_checks()[0], *new_cluster_pair.first, context.runtime(), context.random(),
           context.dispatcher(), context.logManager(), context.messageValidationVisitor(),

@@ -30,6 +30,7 @@ void ConnectionHandlerImpl::decNumConnections() {
 void ConnectionHandlerImpl::addListener(Network::ListenerConfig& config) {
   ActiveListenerDetails details;
   if (config.listenSocketFactory().socketType() == Network::Address::SocketType::Stream) {
+    // 创建一个listen监听
     auto tcp_listener = std::make_unique<ActiveTcpListener>(*this, config);
     details.tcp_listener_ = *tcp_listener;
     details.listener_ = std::move(tcp_listener);
@@ -98,10 +99,12 @@ ConnectionHandlerImpl::ActiveListenerImplBase::ActiveListenerImplBase(
           POOL_GAUGE_PREFIX(config.listenerScope(), parent.statPrefix()))}),
       config_(config) {}
 
+// config.listenSocketFactory().getListenSocket()
 ConnectionHandlerImpl::ActiveTcpListener::ActiveTcpListener(ConnectionHandlerImpl& parent,
                                                             Network::ListenerConfig& config)
     : ActiveTcpListener(
           parent,
+          // // 创建listen
           parent.dispatcher_.createListener(config.listenSocketFactory().getListenSocket(), *this,
                                             config.bindToPort()),
           config) {}

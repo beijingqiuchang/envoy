@@ -254,7 +254,7 @@ public:
    * @return the singleton sink to use for all loggers.
    */
   static DelegatingLogSinkPtr getSink() {
-    static DelegatingLogSinkPtr sink = DelegatingLogSink::init();
+    static DelegatingLogSinkPtr sink = DelegatingLogSink::init();  // DelegatingLogSink
     return sink;
   }
 

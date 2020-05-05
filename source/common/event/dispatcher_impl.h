@@ -104,9 +104,10 @@ private:
   Thread::ThreadId run_tid_;
   Buffer::WatermarkFactoryPtr buffer_factory_;
   LibeventScheduler base_scheduler_;
-  SchedulerPtr scheduler_;
+  SchedulerPtr scheduler_;  // 类型是 RealScheduler ，是由 RealTimeSystem::createScheduler 创建的
   TimerPtr deferred_delete_timer_;
   TimerPtr post_timer_;
+  // 延迟析构，把要析构的数据，交给dispatcher来析构
   std::vector<DeferredDeletablePtr> to_delete_1_;
   std::vector<DeferredDeletablePtr> to_delete_2_;
   std::vector<DeferredDeletablePtr>* current_to_delete_;

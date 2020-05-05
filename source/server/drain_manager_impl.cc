@@ -42,13 +42,15 @@ void DrainManagerImpl::drainSequenceTick() {
   ASSERT(drain_time_completed_.load() < server_.options().drainTime().count());
   ++drain_time_completed_;
 
+  // 经过多少秒，每一秒触发一次
   if (drain_time_completed_.load() < server_.options().drainTime().count()) {
     drain_tick_timer_->enableTimer(std::chrono::milliseconds(1000));
-  } else if (drain_sequence_completion_) {
+  } else if (drain_sequence_completion_) {  // 设置了触发函数
     drain_sequence_completion_();
   }
 }
 
+// 启动drain
 void DrainManagerImpl::startDrainSequence(std::function<void()> completion) {
   drain_sequence_completion_ = completion;
   ASSERT(!draining_);

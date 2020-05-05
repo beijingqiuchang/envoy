@@ -66,14 +66,21 @@ bool hostWeightsAreEqual(const HostVector& hosts) {
 
 } // namespace
 
+// 根据优先级，确定本次命中的优先级层
 std::pair<uint32_t, LoadBalancerBase::HostAvailability>
 LoadBalancerBase::choosePriority(uint64_t hash, const HealthyLoad& healthy_per_priority_load,
                                  const DegradedLoad& degraded_per_priority_load) {
+  // hash是随机生成的
   hash = hash % 100 + 1; // 1-100
   uint32_t aggregate_percentage_load = 0;
   // As with tryChooseLocalLocalityHosts, this can be refactored for efficiency
   // but O(N) is good enough for now given the expected number of priorities is
   // small.
+
+  /*
+   * 分为3个优先级：1，2，3；承接的流量分别是50%, 30%, 20%
+   * 通过下面的循环，可以决定命中的哪一个优先级
+   * */
 
   // We first attempt to select a priority based on healthy availability.
   for (size_t priority = 0; priority < healthy_per_priority_load.get().size(); ++priority) {
@@ -158,6 +165,9 @@ void LoadBalancerBase::recalculatePerPriorityState(uint32_t priority,
     // hosts are healthy that priority's health is 100%*1.4=140% and is capped at 100% which results
     // in 100%. If 80% of hosts are healthy, that priority's health is still 100% (80%*1.4=112% and
     // capped at 100%).
+    // 计算每个优先级层，要承接多少的流量
+    // overprovisioningFactor：超配因子， 这个层级承接的流量根据这一层的健康机器占比决定
+    // https://www.scriptjc.com/article/1084
     per_priority_health.get()[priority] = std::min<uint32_t>(
         100, (host_set.overprovisioningFactor() * host_set.healthyHosts().size() / host_count));
 
@@ -254,14 +264,20 @@ void LoadBalancerBase::recalculatePerPriorityPanic() {
   }
 }
 
+/*
+ * 选择这次命中的优先级，并发这次优先级对应的hosts返回
+ * */
 std::pair<HostSet&, LoadBalancerBase::HostAvailability>
 LoadBalancerBase::chooseHostSet(LoadBalancerContext* context) {
   if (context) {
+    // 就先用priority_loads = per_priority_load_ 往后看
     const auto priority_loads = context->determinePriorityLoad(priority_set_, per_priority_load_);
 
+    // 选择这次要请求的优先级
     const auto priority_and_source =
         choosePriority(random_.random(), priority_loads.healthy_priority_load_,
                        priority_loads.degraded_priority_load_);
+    // 返回优先级对应的Hosts
     return {*priority_set_.hostSetsPerPriority()[priority_and_source.first],
             priority_and_source.second};
   }
@@ -552,6 +568,7 @@ ZoneAwareLoadBalancerBase::hostSourceToUse(LoadBalancerContext* context) {
 
   // If the selected host set has insufficient healthy hosts, return all hosts (unless we should
   // fail traffic on panic, in which case return no host).
+  // 如果处于恐慌阈值内，就使用全部的hosts
   if (per_priority_panic_[hosts_source.priority_]) {
     stats_.lb_healthy_panic_.inc();
     if (fail_traffic_on_panic_) {
@@ -730,6 +747,8 @@ HostConstSharedPtr EdfLoadBalancerBase::chooseHostOnce(LoadBalancerContext* cont
     }
     return host;
   } else {
+    // 选择某一个hosts，是全部机器，还是健康的
+    // 通过上面的操作，hosts_source已经设置好是使用哪一个优先级的，是健康还是降级，还是全部host作为待选
     const HostVector& hosts_to_use = hostSourceToHosts(*hosts_source);
     if (hosts_to_use.empty()) {
       return nullptr;
@@ -738,6 +757,7 @@ HostConstSharedPtr EdfLoadBalancerBase::chooseHostOnce(LoadBalancerContext* cont
   }
 }
 
+// EdfLoadBalancerBase::chooseHostOnce 调用
 HostConstSharedPtr LeastRequestLoadBalancer::unweightedHostPick(const HostVector& hosts_to_use,
                                                                 const HostsSource&) {
   HostSharedPtr candidate_host = nullptr;

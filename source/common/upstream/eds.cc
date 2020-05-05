@@ -27,6 +27,8 @@ EdsClusterImpl::EdsClusterImpl(
   } else {
     initialize_phase_ = InitializePhase::Secondary;
   }
+
+  // SubscriptionFactoryImpl::subscriptionFromConfigSource
   subscription_ =
       factory_context.clusterManager().subscriptionFactory().subscriptionFromConfigSource(
           eds_config,

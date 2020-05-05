@@ -17,6 +17,7 @@ Http::FilterFactoryCb HealthCheckFilterConfig::createFilterFactoryFromProtoTyped
     const std::string&, Server::Configuration::FactoryContext& context) {
   ASSERT(proto_config.has_pass_through_mode());
 
+  // 过滤器是否在传递模式下运行
   const bool pass_through_mode = proto_config.pass_through_mode().value();
   const int64_t cache_time_ms = PROTOBUF_GET_MS_OR_DEFAULT(proto_config, cache_time, 0);
 

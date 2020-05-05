@@ -91,11 +91,11 @@ protected:
   virtual envoy::data::core::v2alpha::HealthCheckerType healthCheckerType() const PURE;
 
   const bool always_log_health_check_failures_;
-  const Cluster& cluster_;
+  const Cluster& cluster_;  // EdsClusterImpl
   Event::Dispatcher& dispatcher_;
   const std::chrono::milliseconds timeout_;
-  const uint32_t unhealthy_threshold_;
-  const uint32_t healthy_threshold_;
+  const uint32_t unhealthy_threshold_;  // 在主机被标记为不健康之前，需要进行不健康的健康检查次数。请注意，对于http运行健康检查，如果主机以503响应，此阈值将被忽略，并且主机立即被视为不健康。
+  const uint32_t healthy_threshold_;  // 主机在标记为健康之前所需的健康检查次数。请注意，在启动过程中，只需要一次成功的健康检查即可将主机标记为健康状态。
   HealthCheckerStats stats_;
   Runtime::Loader& runtime_;
   Runtime::RandomGenerator& random_;
@@ -132,15 +132,15 @@ private:
   static const std::chrono::milliseconds NO_TRAFFIC_INTERVAL;
 
   std::list<HostStatusCb> callbacks_;
-  const std::chrono::milliseconds interval_;
+  const std::chrono::milliseconds interval_;  // 每次尝试健康检查之间的时间间隔
   const std::chrono::milliseconds no_traffic_interval_;
-  const std::chrono::milliseconds initial_jitter_;
+  const std::chrono::milliseconds initial_jitter_;  // 0-initial_jitter_之间一个随机值，进行check
   const std::chrono::milliseconds interval_jitter_;
   const uint32_t interval_jitter_percent_;
   const std::chrono::milliseconds unhealthy_interval_;
   const std::chrono::milliseconds unhealthy_edge_interval_;
   const std::chrono::milliseconds healthy_edge_interval_;
-  std::unordered_map<HostSharedPtr, ActiveHealthCheckSessionPtr> active_sessions_;
+  std::unordered_map<HostSharedPtr, ActiveHealthCheckSessionPtr> active_sessions_;  // host对应的session
   uint64_t local_process_healthy_{};
   uint64_t local_process_degraded_{};
 };

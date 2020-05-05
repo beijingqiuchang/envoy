@@ -131,7 +131,7 @@ private:
 
   uint64_t base_id_;
   uint32_t concurrency_;
-  std::string config_path_;
+  std::string config_path_;  // -c命令
   envoy::config::bootstrap::v2::Bootstrap config_proto_;
   std::string config_yaml_;
   bool allow_unknown_static_fields_{false};
@@ -152,12 +152,12 @@ private:
   std::chrono::seconds drain_time_;
   std::chrono::seconds parent_shutdown_time_;
   Server::Mode mode_;
-  bool hot_restart_disabled_;
+  bool hot_restart_disabled_;  // 来自命令：disable-hot-restart
   bool signal_handling_enabled_;
-  bool mutex_tracing_enabled_;
-  bool cpuset_threads_;
-  bool fake_symbol_table_enabled_;
-  uint32_t count_;
+  bool mutex_tracing_enabled_;  // 来自命令：enable-mutex-tracing
+  bool cpuset_threads_;  // 来自命令：cpuset-threads
+  bool fake_symbol_table_enabled_;  // 来自命令：use-fake-symbol-table
+  uint32_t count_;  // 命令的个数
 };
 
 /**

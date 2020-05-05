@@ -47,6 +47,10 @@
 namespace Envoy {
 namespace Server {
 
+// restarter 是 HotRestartNopImpl
+// component_factory 是 ProdComponentFactory
+// hooks 是 DefaultListenerHooks
+// dispatcher_初始化好，相当于master_thread的
 InstanceImpl::InstanceImpl(
     Init::Manager& init_manager, const Options& options, Event::TimeSystem& time_system,
     Network::Address::InstanceConstSharedPtr local_address, ListenerHooks& hooks,
@@ -89,6 +93,7 @@ InstanceImpl::InstanceImpl(
 
     restarter_.initialize(*dispatcher_, *this);
     drain_manager_ = component_factory.createDrainManager(*this);
+    // 核心函数中先加载配置文件，通过参数 -c 配置
     initialize(options, std::move(local_address), component_factory, hooks);
   } catch (const EnvoyException& e) {
     ENVOY_LOG(critical, "error initializing configuration '{}': {}", options.configPath(),
@@ -220,7 +225,7 @@ bool InstanceImpl::healthCheckFailed() { return !live_.load(); }
 InstanceUtil::BootstrapVersion InstanceUtil::loadBootstrapConfig(
     envoy::config::bootstrap::v2::Bootstrap& bootstrap, const Options& options,
     ProtobufMessage::ValidationVisitor& validation_visitor, Api::Api& api) {
-  const std::string& config_path = options.configPath();
+  const std::string& config_path = options.configPath();  // -c只定的配置
   const std::string& config_yaml = options.configYaml();
   const envoy::config::bootstrap::v2::Bootstrap& config_proto = options.configProto();
 
@@ -315,6 +320,8 @@ void InstanceImpl::initialize(const Options& options,
 
   // Learn original_start_time_ if our parent is still around to inform us of it.
   restarter_.sendParentAdminShutdownRequest(original_start_time_);
+  // 配置管理接口
+  // https://www.servicemesher.com/envoy/operations/admin.html ,这里面有admin的配置方法
   admin_ = std::make_unique<AdminImpl>(initial_config.admin().profilePath(), *this);
   if (initial_config.admin().address()) {
     if (initial_config.admin().accessLogPath().empty()) {
@@ -343,9 +350,11 @@ void InstanceImpl::initialize(const Options& options,
       *dispatcher_, stats_store_, thread_local_, bootstrap_.overload_manager(),
       messageValidationContext().staticValidationVisitor(), *api_);
 
+  // 添加一个内存监控
   heap_shrinker_ =
       std::make_unique<Memory::HeapShrinker>(*dispatcher_, *overload_manager_, stats_store_);
 
+  // 创建worker线程
   // Workers get created first so they register for thread local updates.
   listener_manager_ = std::make_unique<ListenerManagerImpl>(
       *this, listener_component_factory_, worker_factory_, bootstrap_.enable_dispatcher_stats());
@@ -380,6 +389,7 @@ void InstanceImpl::initialize(const Options& options,
   // thread local data per above. See MainImpl::initialize() for why ConfigImpl
   // is constructed as part of the InstanceImpl and then populated once
   // cluster_manager_factory_ is available.
+  // 初始化eds
   config_.initialize(bootstrap_, *this, *cluster_manager_factory_);
   http_context_.setTracer(config_.httpTracer());
 
@@ -455,6 +465,9 @@ void InstanceImpl::loadServerFlags(const absl::optional<std::string>& flags_path
   }
 }
 
+// instance是InstanceImpl
+// overload_manager 是 OverloadManagerImpl
+// cm 是 ClusterManagerImpl
 RunHelper::RunHelper(Instance& instance, const Options& options, Event::Dispatcher& dispatcher,
                      Upstream::ClusterManager& cm, AccessLog::AccessLogManager& access_log_manager,
                      Init::Manager& init_manager, OverloadManager& overload_manager,
@@ -487,7 +500,7 @@ RunHelper::RunHelper(Instance& instance, const Options& options, Event::Dispatch
   }
 
   // Start overload manager before workers.
-  overload_manager.start();
+  overload_manager.start();  // 启动过载管理
 
   // Register for cluster manager init notification. We don't start serving worker traffic until
   // upstream clusters are initialized which may involve running the event loop. Note however that
@@ -528,6 +541,7 @@ void InstanceImpl::run() {
 
   // Run the main dispatch loop waiting to exit.
   ENVOY_LOG(info, "starting main dispatch loop");
+  // WatchDogImpl
   auto watchdog =
       guard_dog_->createWatchDog(api_->threadFactory().currentThreadId(), "main_thread");
   watchdog->startWatchdog(*dispatcher_);

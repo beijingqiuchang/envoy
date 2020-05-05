@@ -472,6 +472,7 @@ PrioritySet::UpdateHostsParams HostSetImpl::updateHostsParams(const HostSet& hos
 PrioritySet::UpdateHostsParams
 HostSetImpl::partitionHosts(HostVectorConstSharedPtr hosts,
                             HostsPerLocalityConstSharedPtr hosts_per_locality) {
+  // 对host的健康状态做划分
   auto partitioned_hosts = ClusterImplBase::partitionHostList(*hosts);
   auto healthy_degraded_excluded_hosts_per_locality =
       ClusterImplBase::partitionHostsPerLocality(*hosts_per_locality);
@@ -852,6 +853,7 @@ ClusterImplBase::ClusterImplBase(
       });
 }
 
+// 根据每个host的健康状态，做划分
 std::tuple<HealthyHostVectorConstSharedPtr, DegradedHostVectorConstSharedPtr,
            ExcludedHostVectorConstSharedPtr>
 ClusterImplBase::partitionHostList(const HostVector& hosts) {
@@ -953,6 +955,7 @@ void ClusterImplBase::finishInitialization() {
 void ClusterImplBase::setHealthChecker(const HealthCheckerSharedPtr& health_checker) {
   ASSERT(!health_checker_);
   health_checker_ = health_checker;
+  // ProdHttpHealthCheckerImpl.start();
   health_checker_->start();
   health_checker_->addHostCheckCompleteCb(
       [this](const HostSharedPtr& host, HealthTransition changed_state) -> void {
@@ -988,13 +991,16 @@ void ClusterImplBase::reloadHealthyHosts(const HostSharedPtr& host) {
 }
 
 void ClusterImplBase::reloadHealthyHostsHelper(const HostSharedPtr&) {
+  // 与lb相关联
   const auto& host_sets = prioritySet().hostSetsPerPriority();
+  // 遍历每一个优先级
   for (size_t priority = 0; priority < host_sets.size(); ++priority) {
     const auto& host_set = host_sets[priority];
     // TODO(htuch): Can we skip these copies by exporting out const shared_ptr from HostSet?
     HostVectorConstSharedPtr hosts_copy(new HostVector(host_set->hosts()));
 
     HostsPerLocalityConstSharedPtr hosts_per_locality_copy = host_set->hostsPerLocality().clone();
+    // 集群自己的
     prioritySet().updateHosts(priority,
                               HostSetImpl::partitionHosts(hosts_copy, hosts_per_locality_copy),
                               host_set->localityWeights(), {}, {}, absl::nullopt);
@@ -1103,6 +1109,9 @@ void PriorityStateManager::initializePriorityFor(
   if (priority_state_[priority].first == nullptr) {
     priority_state_[priority].first = std::make_unique<HostVector>();
   }
+
+  // https://www.cnblogs.com/midashu/p/11562887.html
+  // locality: {} # 标识上游主机所处的位置，通常以region、zone等进行标识；
   if (locality_lb_endpoint.has_locality() && locality_lb_endpoint.has_load_balancing_weight()) {
     priority_state_[priority].second[locality_lb_endpoint.locality()] =
         locality_lb_endpoint.load_balancing_weight().value();

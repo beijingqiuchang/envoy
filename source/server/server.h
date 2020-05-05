@@ -264,18 +264,18 @@ private:
   bool workers_started_;
   std::atomic<bool> live_;
   bool shutdown_;
-  const Options& options_;
+  const Options& options_;  // 实际是OptionsImpl
   ProtobufMessage::ProdValidationContextImpl validation_context_;
   TimeSource& time_source_;
-  HotRestart& restarter_;
+  HotRestart& restarter_;  // HotRestartNopImpl
   const time_t start_time_;
   time_t original_start_time_;
   Stats::StoreRoot& stats_store_;
   std::unique_ptr<ServerStats> server_stats_;
   Assert::ActionRegistrationPtr assert_action_registration_;
   ThreadLocal::Instance& thread_local_;
-  Api::ApiPtr api_;
-  Event::DispatcherPtr dispatcher_;
+  Api::ApiPtr api_;  // Api::Impl
+  Event::DispatcherPtr dispatcher_;  // 是 DispatcherImpl 类
   std::unique_ptr<AdminImpl> admin_;
   Singleton::ManagerPtr singleton_manager_;
   Network::ConnectionHandlerPtr handler_;
@@ -289,10 +289,10 @@ private:
   Network::DnsResolverSharedPtr dns_resolver_;
   Event::TimerPtr stat_flush_timer_;
   LocalInfo::LocalInfoPtr local_info_;
-  DrainManagerPtr drain_manager_;
+  DrainManagerPtr drain_manager_;  // DrainManagerImpl , https://www.servicemesher.com/envoy/intro/arch_overview/hot_restart.html#arch-overview-hot-restart
   AccessLog::AccessLogManagerImpl access_log_manager_;
   std::unique_ptr<Upstream::ClusterManagerFactory> cluster_manager_factory_;
-  std::unique_ptr<Server::GuardDog> guard_dog_;
+  std::unique_ptr<Server::GuardDog> guard_dog_;  // GuardDogImpl
   bool terminated_;
   std::unique_ptr<Logger::FileSinkDelegate> file_logger_;
   envoy::config::bootstrap::v2::Bootstrap bootstrap_;

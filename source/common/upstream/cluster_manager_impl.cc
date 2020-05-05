@@ -1,4 +1,4 @@
-#include "common/upstream/cluster_manager_impl.h"
+﻿#include "common/upstream/cluster_manager_impl.h"
 
 #include <chrono>
 #include <cstdint>
@@ -212,6 +212,7 @@ ClusterManagerImpl::ClusterManagerImpl(
   async_client_manager_ =
       std::make_unique<Grpc::AsyncClientManagerImpl>(*this, tls, time_source_, api);
   const auto& cm_config = bootstrap.cluster_manager();
+  // 驱逐算法，https://www.envoyproxy.io/docs/envoy/latest/api-v2/api/v2/cluster/outlier_detection.proto
   if (cm_config.has_outlier_detection()) {
     const std::string event_log_file_path = cm_config.outlier_detection().event_log_path();
     if (!event_log_file_path.empty()) {
@@ -229,6 +230,7 @@ ClusterManagerImpl::ClusterManagerImpl(
   // loading is done because in v2 configuration each EDS cluster individually sets up a
   // subscription. When this subscription is an API source the cluster will depend on a non-EDS
   // cluster, so the non-EDS clusters must be loaded first.
+  // 加载静态的eds
   for (const auto& cluster : bootstrap.static_resources().clusters()) {
     // First load all the primary clusters.
     if (cluster.type() != envoy::api::v2::Cluster::EDS ||
@@ -243,6 +245,7 @@ ClusterManagerImpl::ClusterManagerImpl(
   // This is the only point where distinction between delta ADS and state-of-the-world ADS is made.
   // After here, we just have a GrpcMux interface held in ads_mux_, which hides
   // whether the backing implementation is delta or SotW.
+  // ads介绍：https://jimmysong.io/istio-handbook/data-plane/envoy-ads.html
   if (dyn_resources.has_ads_config()) {
     if (dyn_resources.ads_config().api_type() ==
         envoy::api::v2::core::ApiConfigSource::DELTA_GRPC) {
@@ -288,6 +291,9 @@ ClusterManagerImpl::ClusterManagerImpl(
   cm_stats_.cluster_added_.add(bootstrap.static_resources().clusters().size());
   updateClusterCounts();
 
+  // 本地集群名
+  // Zone 感知路由的时候，就必须启用，讲解连接：https://www.servicemesher.com/envoy/intro/arch_overview/load_balancing.html
+  // 连接中，直接搜索"Zone 感知路由"
   absl::optional<std::string> local_cluster_name;
   if (!cm_config.local_cluster_name().empty()) {
     local_cluster_name_ = cm_config.local_cluster_name();
@@ -306,7 +312,9 @@ ClusterManagerImpl::ClusterManagerImpl(
   });
 
   // We can now potentially create the CDS API once the backing cluster exists.
+  // cds 配置
   if (dyn_resources.has_cds_config()) {
+    // CdsApiImpl
     cds_api_ = factory_.createCds(dyn_resources.cds_config(), *this);
     init_helper_.setCds(cds_api_.get());
   } else {
@@ -570,6 +578,7 @@ bool ClusterManagerImpl::addOrUpdateCluster(const envoy::api::v2::Cluster& clust
       warming_clusters_.erase(warming_it);
 
       ENVOY_LOG(debug, "warming cluster {} complete", cluster_name);
+      // 创建每个线程自己的cluster
       createOrUpdateThreadLocalCluster(cluster_entry);
       onClusterInit(*cluster_entry.cluster_);
       updateClusterCounts();
@@ -594,6 +603,7 @@ void ClusterManagerImpl::createOrUpdateThreadLocalCluster(ClusterData& cluster) 
 
     auto thread_local_cluster = new ThreadLocalClusterManagerImpl::ClusterEntry(
         cluster_manager, new_cluster, thread_aware_lb_factory);
+
     cluster_manager.thread_local_clusters_[new_cluster->name()].reset(thread_local_cluster);
     for (auto& cb : cluster_manager.update_callbacks_) {
       cb->onClusterAddOrUpdate(*thread_local_cluster);
@@ -645,6 +655,9 @@ bool ClusterManagerImpl::removeCluster(const std::string& cluster_name) {
 void ClusterManagerImpl::loadCluster(const envoy::api::v2::Cluster& cluster,
                                      const std::string& version_info, bool added_via_api,
                                      ClusterMap& cluster_map) {
+  // ProdClusterManagerFactory::clusterFromProto
+  // 返回： <EdsClusterImpl, nullptr>
+  // cds: StaticClusterImpl
   std::pair<ClusterSharedPtr, ThreadAwareLoadBalancerPtr> new_cluster_pair =
       factory_.clusterFromProto(cluster, *this, outlier_event_logger_, added_via_api);
   auto& new_cluster = new_cluster_pair.first;

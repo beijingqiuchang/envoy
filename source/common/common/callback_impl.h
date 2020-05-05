@@ -36,7 +36,7 @@ public:
    */
   void runCallbacks(CallbackArgs... args) {
     for (auto it = callbacks_.cbegin(); it != callbacks_.cend();) {
-      auto current = it++;
+      auto current = it++;  // 这里++，是为了避免cb中进行自己删除
       current->cb_(args...);
     }
   }

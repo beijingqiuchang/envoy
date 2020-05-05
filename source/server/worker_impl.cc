@@ -15,6 +15,7 @@ namespace Server {
 
 WorkerPtr ProdWorkerFactory::createWorker(OverloadManager& overload_manager,
                                           const std::string& worker_name) {
+  // 新建立一个dispatcher
   Event::DispatcherPtr dispatcher(api_.allocateDispatcher());
   return WorkerPtr{new WorkerImpl(
       tls_, hooks_, std::move(dispatcher),
@@ -41,6 +42,7 @@ void WorkerImpl::addListener(Network::ListenerConfig& listener, AddListenerCompl
   // to surface this.
   dispatcher_->post([this, &listener, completion]() -> void {
     try {
+      // void ConnectionHandlerImpl::addListener(Network::ListenerConfig& config)
       handler_->addListener(listener);
       hooks_.onWorkerListenerAdded();
       completion(true);

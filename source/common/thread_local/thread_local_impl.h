@@ -47,7 +47,7 @@ private:
     void set(InitializeCb cb) override;
 
     InstanceImpl& parent_;
-    const uint64_t index_;
+    const uint64_t index_;  // 指向的是每个线程自己的ThreadLocalData变量中的data_下表
   };
 
   // A Wrapper of SlotImpl which on destruction returns the SlotImpl to the deferred delete queue
@@ -71,8 +71,8 @@ private:
   };
 
   struct ThreadLocalData {
-    Event::Dispatcher* dispatcher_{};
-    std::vector<ThreadLocalObjectSharedPtr> data_;
+    Event::Dispatcher* dispatcher_{};  // 指向当前线程的Dispatcher对象
+    std::vector<ThreadLocalObjectSharedPtr> data_;  // 其中一个是vector，保存了所有的ThreadLocalObject
   };
 
   void recycle(std::unique_ptr<SlotImpl>&& slot);
@@ -82,7 +82,7 @@ private:
   void removeSlot(SlotImpl& slot);
   void runOnAllThreads(Event::PostCb cb);
   void runOnAllThreads(Event::PostCb cb, Event::PostCb main_callback);
-  static void setThreadLocal(uint32_t index, ThreadLocalObjectSharedPtr object);
+  static void setThreadLocal(uint32_t index, ThreadLocalObjectSharedPtr object);  // 把要共享的数据放到线程存储中
 
   static thread_local ThreadLocalData thread_local_data_;
 
@@ -91,13 +91,13 @@ private:
   // is defined as a map of SlotImpl address to the unique_ptr<SlotImpl>.
   absl::flat_hash_map<SlotImpl*, std::unique_ptr<SlotImpl>> deferred_deletes_;
 
-  std::vector<SlotImpl*> slots_;
+  std::vector<SlotImpl*> slots_;  // 所有分配出去的Slot 
   // A list of index of freed slots.
   std::list<uint32_t> free_slot_indexes_;
 
-  std::list<std::reference_wrapper<Event::Dispatcher>> registered_threads_;
+  std::list<std::reference_wrapper<Event::Dispatcher>> registered_threads_;  //保存所有注册到ThreadLocal中的Dispatcher对象
   std::thread::id main_thread_id_;
-  Event::Dispatcher* main_thread_dispatcher_{};
+  Event::Dispatcher* main_thread_dispatcher_{};  // 主线程的Dispatcher
   std::atomic<bool> shutdown_{};
 
   // Test only.

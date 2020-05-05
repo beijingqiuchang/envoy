@@ -409,7 +409,7 @@ private:
 
   Server::Instance& server_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
-  const std::string profile_path_;
+  const std::string profile_path_;  // 在配置中profile_path，https://www.envoyproxy.io/docs/envoy/v1.5.0/api-v1/admin
   Http::ConnectionManagerStats stats_;
   // Note: this is here to essentially blackhole the tracing stats since they aren't used in the
   // Admin case.

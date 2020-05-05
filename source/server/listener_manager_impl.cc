@@ -203,6 +203,7 @@ ProdListenerComponentFactory::createDrainManager(envoy::api::v2::Listener::Drain
   return DrainManagerPtr{new DrainManagerImpl(server_, drain_type)};
 }
 
+// worker_factory��ProdWorkerFactory
 ListenerManagerImpl::ListenerManagerImpl(Instance& server,
                                          ListenerComponentFactory& listener_factory,
                                          WorkerFactory& worker_factory,
@@ -213,7 +214,8 @@ ListenerManagerImpl::ListenerManagerImpl(Instance& server,
           "listeners", [this] { return dumpListenerConfigs(); })),
       enable_dispatcher_stats_(enable_dispatcher_stats) {
   for (uint32_t i = 0; i < server.options().concurrency(); i++) {
-    workers_.emplace_back(
+      // ProdWorkerFactory::createWorker
+      workers_.emplace_back(
         worker_factory.createWorker(server.overloadManager(), fmt::format("worker_{}", i)));
   }
 }
@@ -314,7 +316,7 @@ bool ListenerManagerImpl::addOrUpdateListener(const envoy::api::v2::Listener& co
 bool ListenerManagerImpl::addOrUpdateListenerInternal(const envoy::api::v2::Listener& config,
                                                       const std::string& version_info,
                                                       bool added_via_api, const std::string& name) {
-
+  // 目前是否已经进入停止状态
   if (listenersStopped(config)) {
     ENVOY_LOG(
         debug,

@@ -333,6 +333,8 @@ void DetectorImpl::checkHostForUneject(HostSharedPtr host, DetectorHostMonitorIm
       std::chrono::milliseconds(runtime_.snapshot().getInteger(
           "outlier_detection.base_ejection_time_ms", config_.baseEjectionTimeMs()));
   ASSERT(monitor->numEjections() > 0);
+  // 驱逐时间: 驱逐的次数 * base_eject_time
+  // 意味着次数越多，时间越长
   if ((base_eject_time * monitor->numEjections()) <= (now - monitor->lastEjectionTime().value())) {
     stats_.ejections_active_.dec();
     host->healthFlagClear(Host::HealthFlag::FAILED_OUTLIER_CHECK);
@@ -453,6 +455,7 @@ void DetectorImpl::ejectHost(HostSharedPtr host,
   double ejected_percent = 100.0 * stats_.ejections_active_.value() / host_monitors_.size();
   // Note this is not currently checked per-priority level, so it is possible
   // for outlier detection to eject all hosts at any given priority level.
+  // 高于这个阈值，就不要再继续了
   if (ejected_percent < max_ejection_percent) {
     if (type == envoy::data::cluster::v2alpha::OutlierEjectionType::CONSECUTIVE_5XX ||
         type == envoy::data::cluster::v2alpha::OutlierEjectionType::SUCCESS_RATE) {
@@ -585,10 +588,13 @@ DetectorImpl::EjectionPair DetectorImpl::successRateEjectionThreshold(
 
 void DetectorImpl::processSuccessRateEjections(
     DetectorHostMonitor::SuccessRateMonitorType monitor_type) {
+  // 请求的host小于success_rate_minimum_hosts， 则不计算
   uint64_t success_rate_minimum_hosts = runtime_.snapshot().getInteger(
       "outlier_detection.success_rate_minimum_hosts", config_.successRateMinimumHosts());
+  // 请求量小于success_rate_request_volume，则不计算
   uint64_t success_rate_request_volume = runtime_.snapshot().getInteger(
       "outlier_detection.success_rate_request_volume", config_.successRateRequestVolume());
+  // 机器数量小于failure_percentage_minimum_hosts，不进行计算
   uint64_t failure_percentage_minimum_hosts =
       runtime_.snapshot().getInteger("outlier_detection.failure_percentage_minimum_hosts",
                                      config_.failurePercentageMinimumHosts());
@@ -610,12 +616,14 @@ void DetectorImpl::processSuccessRateEjections(
   }
 
   // reserve upper bound of vector size to avoid reallocation.
+  // 存储每个host的成功率
   valid_success_rate_hosts.reserve(host_monitors_.size());
   valid_failure_percentage_hosts.reserve(host_monitors_.size());
 
   for (const auto& host : host_monitors_) {
     // Don't do work if the host is already ejected.
     if (!host.first->healthFlagGet(Host::HealthFlag::FAILED_OUTLIER_CHECK)) {
+      // 获取每个host的成功率，和分母值
       absl::optional<std::pair<double, uint64_t>> host_success_rate_and_volume =
           host.second->getSRMonitor(monitor_type)
               .successRateAccumulator()
@@ -627,6 +635,7 @@ void DetectorImpl::processSuccessRateEjections(
       double success_rate = host_success_rate_and_volume.value().first;
       double request_volume = host_success_rate_and_volume.value().second;
 
+      // 只有分母满足要求，才可以
       if (request_volume >=
           std::min(success_rate_request_volume, failure_percentage_request_volume)) {
         host.second->successRate(monitor_type, success_rate);
@@ -691,6 +700,7 @@ void DetectorImpl::onIntervalTimer() {
   MonotonicTime now = time_source_.monotonicTime();
 
   for (auto host : host_monitors_) {
+    // 哪些host可以恢复正常了
     checkHostForUneject(host.first, host.second, now);
 
     // Need to update the writer bucket to keep the data valid.

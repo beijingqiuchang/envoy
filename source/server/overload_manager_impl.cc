@@ -110,6 +110,8 @@ OverloadManagerImpl::OverloadManagerImpl(
     auto& factory =
         Config::Utility::getAndCheckFactory<Configuration::ResourceMonitorFactory>(name);
     auto config = Config::Utility::translateToFactoryConfig(resource, validation_visitor, factory);
+    // 会自动调用适配的FactoryBase::createEmptyConfigResourceMonitor
+    // 目前有两个monitor: FixedHeapMonitor、InjectedResourceMonitor
     auto monitor = factory.createResourceMonitor(*config, context);
 
     auto result =
@@ -120,6 +122,8 @@ OverloadManagerImpl::OverloadManagerImpl(
     }
   }
 
+  // 这里的action，就是pb的结构。里面都是string类型，只是解析了配置文件而已
+  // https://www.envoyproxy.io/docs/envoy/v1.9.0/configuration/overload_manager/overload_manager#overload-actions
   for (const auto& action : config.actions()) {
     const auto& name = action.name();
     ENVOY_LOG(debug, "Adding overload action {}", name);
@@ -146,6 +150,8 @@ void OverloadManagerImpl::start() {
   ASSERT(!started_);
   started_ = true;
 
+  // 必须在这里进行set，因为全部线程注册完成
+  // 每一个线程都会有一个
   tls_->set([](Event::Dispatcher&) -> ThreadLocal::ThreadLocalObjectSharedPtr {
     return std::make_shared<ThreadLocalOverloadState>();
   });
@@ -154,8 +160,11 @@ void OverloadManagerImpl::start() {
     return;
   }
 
+  // 启动时间任务
   timer_ = dispatcher_.createTimer([this]() -> void {
     for (auto& resource : resources_) {
+      // void OverloadManagerImpl::Resource::update()
+      // 每一个monitor都执行update
       resource.second.update();
     }
 
@@ -174,6 +183,8 @@ void OverloadManagerImpl::stop() {
   resources_.clear();
 }
 
+// 注册action
+// 每个dispatcher都要注册一次
 bool OverloadManagerImpl::registerForAction(const std::string& action,
                                             Event::Dispatcher& dispatcher,
                                             OverloadActionCb callback) {
@@ -193,21 +204,25 @@ ThreadLocalOverloadState& OverloadManagerImpl::getThreadLocalOverloadState() {
   return tls_->getTyped<ThreadLocalOverloadState>();
 }
 
+// 遍历注册关注这个资源的每一action
 void OverloadManagerImpl::updateResourcePressure(const std::string& resource, double pressure) {
   auto action_range = resource_to_actions_.equal_range(resource);
+  // 每一个action
   std::for_each(action_range.first, action_range.second,
                 [&](ResourceToActionMap::value_type& entry) {
-                  const std::string& action = entry.second;
-                  auto action_it = actions_.find(action);
+                  const std::string& action = entry.second;  // action的名字
+                  auto action_it = actions_.find(action);  // 是否注册了这个action
                   ASSERT(action_it != actions_.end());
+                  // OverloadAction::updateResourcePressure
                   if (action_it->second.updateResourcePressure(resource, pressure)) {
                     const bool is_active = action_it->second.isActive();
                     const auto state =
                         is_active ? OverloadActionState::Active : OverloadActionState::Inactive;
                     ENVOY_LOG(info, "Overload action {} became {}", action,
                               is_active ? "active" : "inactive");
+                    // 向每个线程的dispatcher投递任务
                     tls_->runOnAllThreads([this, action, state] {
-                      tls_->getTyped<ThreadLocalOverloadState>().setState(action, state);
+                      tls_->getTyped<ThreadLocalOverloadState>().setState(action, state);  // 设置线程自己的变量
                     });
                     auto callback_range = action_to_callbacks_.equal_range(action);
                     std::for_each(callback_range.first, callback_range.second,
@@ -230,7 +245,7 @@ OverloadManagerImpl::Resource::Resource(const std::string& name, ResourceMonitor
 void OverloadManagerImpl::Resource::update() {
   if (!pending_update_) {
     pending_update_ = true;
-    monitor_->updateResourceUsage(*this);
+    monitor_->updateResourceUsage(*this);  // 调用的是void OverloadManagerImpl::Resource::onSuccess
     return;
   }
   ENVOY_LOG(debug, "Skipping update for resource {} which has pending update", name_);
@@ -239,6 +254,7 @@ void OverloadManagerImpl::Resource::update() {
 
 void OverloadManagerImpl::Resource::onSuccess(const ResourceUsage& usage) {
   pending_update_ = false;
+  // 遍历每一个注册的action
   manager_.updateResourcePressure(name_, usage.resource_pressure_);
   pressure_gauge_.set(usage.resource_pressure_ * 100); // convert to percent
 }

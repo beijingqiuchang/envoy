@@ -291,6 +291,9 @@ public:
    * @param callback supplies the callback to invoke.
    * @return Common::CallbackHandle* the callback handle.
    */
+  /**
+   * 当member发生变化时，触发的回调函数
+   */
   Common::CallbackHandle* addPriorityUpdateCb(PrioritySet::PriorityUpdateCb callback) const {
     return member_update_cb_helper_.add(callback);
   }
@@ -728,10 +731,11 @@ protected:
   Init::WatcherImpl init_watcher_;
 
   Runtime::Loader& runtime_;
+  // ClusterInfoImpl
   ClusterInfoConstSharedPtr info_; // This cluster info stores the stats scope so it must be
                                    // initialized first and destroyed last.
-  HealthCheckerSharedPtr health_checker_;
-  Outlier::DetectorSharedPtr outlier_detector_;
+  HealthCheckerSharedPtr health_checker_;  // ProdHttpHealthCheckerImpl
+  Outlier::DetectorSharedPtr outlier_detector_;  // DetectorImpl
 
 protected:
   PrioritySetImpl priority_set_;
@@ -773,6 +777,7 @@ public:
                           const envoy::api::v2::endpoint::LocalityLbEndpoints& locality_lb_endpoint,
                           const envoy::api::v2::endpoint::LbEndpoint& lb_endpoint);
 
+  // host: HostImpl
   void registerHostForPriority(
       const HostSharedPtr& host,
       const envoy::api::v2::endpoint::LocalityLbEndpoints& locality_lb_endpoint);
@@ -791,8 +796,10 @@ public:
   PriorityState& priorityState() { return priority_state_; }
 
 private:
-  ClusterImplBase& parent_;
-  PriorityState priority_state_;
+  ClusterImplBase& parent_;  // StaticClusterImpl
+  // std::pair<HostListPtr, LocalityWeightsMap>, HostListPtr:HostImpl
+  // 添加函数：registerHostForPriority(const HostSharedPtr& host, const envoy::api::v2::endpoint::LocalityLbEndpoints& locality_lb_endpoint)
+  PriorityState priority_state_;  // 优先级，有多少优先级，数组长度就是多少，优先级就是数组下标, 设置函数：initializePriorityFor
   const envoy::api::v2::core::Node& local_info_node_;
   PrioritySet::HostUpdateCb* update_cb_;
 };

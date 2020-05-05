@@ -56,14 +56,19 @@ void FilterChainUtility::buildUdpFilterChain(
 void MainImpl::initialize(const envoy::config::bootstrap::v2::Bootstrap& bootstrap,
                           Instance& server,
                           Upstream::ClusterManagerFactory& cluster_manager_factory) {
+  // SDS（秘钥发现服务）  https://jimmysong.io/istio-handbook/data-plane/envoy-sds.html 
   const auto& secrets = bootstrap.static_resources().secrets();
   ENVOY_LOG(info, "loading {} static secret(s)", secrets.size());
   for (ssize_t i = 0; i < secrets.size(); i++) {
     ENVOY_LOG(debug, "static secret #{}: {}", i, secrets[i].name());
+    // InstanceImpl::secretManager
     server.secretManager().addStaticSecret(secrets[i]);
   }
 
+  // 初始化xds（xds是各种ds的全称, https://skyao.io/learning-envoy/xds/）
   ENVOY_LOG(info, "loading {} cluster(s)", bootstrap.static_resources().clusters().size());
+  // ProdClusterManagerFactory::clusterManagerFromProto
+  // 初始化 cluster
   cluster_manager_ = cluster_manager_factory.clusterManagerFromProto(bootstrap);
 
   const auto& listeners = bootstrap.static_resources().listeners();

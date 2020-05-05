@@ -11,6 +11,7 @@
  * deployment such as initializing signal handling. It calls main_common
  * after setting up command line options.
  */
+// 主进程开始运行
 int main(int argc, char** argv) {
 #ifndef __APPLE__
   // absl::Symbolize mostly works without this, but this improves corner case
@@ -36,5 +37,5 @@ int main(int argc, char** argv) {
 
   // Run the server listener loop outside try/catch blocks, so that unexpected exceptions
   // show up as a core-dumps for easier diagnostics.
-  return main_common->run() ? EXIT_SUCCESS : EXIT_FAILURE;
+  return main_common->run() ? EXIT_SUCCESS : EXIT_FAILURE;  // bool MainCommonBase::run()函数
 }

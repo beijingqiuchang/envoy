@@ -59,6 +59,7 @@ resolveProtoSocketAddress(const envoy::api::v2::core::SocketAddress& socket_addr
   Resolver* resolver = nullptr;
   const std::string& resolver_name = socket_address.resolver_name();
   if (resolver_name.empty()) {
+    // IpResolver
     resolver =
         Registry::FactoryRegistry<Resolver>::getFactory(Config::AddressResolverNames::get().IP);
   } else {
@@ -67,6 +68,8 @@ resolveProtoSocketAddress(const envoy::api::v2::core::SocketAddress& socket_addr
   if (resolver == nullptr) {
     throw EnvoyException(fmt::format("Unknown address resolver: {}", resolver_name));
   }
+
+  // Address::Ipv4Instance
   return resolver->resolve(socket_address);
 }
 

@@ -42,6 +42,8 @@ public:
 
 /**
  * HTTP health checker implementation. Connection keep alive is used where possible.
+ * 参数解释： https://www.envoyproxy.io/docs/envoy/latest/api-v2/api/v2/core/health_check.proto#envoy-api-msg-core-healthcheck-httphealthcheck
+ * 部分中文参数：https://www.bookstack.cn/read/envoyproxy_doc_ZH_CN/v2APIreference-Healthcheck.md#healthcheckhttphealthcheck
  */
 class HttpHealthCheckerImpl : public HealthCheckerImplBase {
 public:
@@ -76,7 +78,7 @@ private:
     bool shouldClose() const;
 
     // ActiveHealthCheckSession
-    void onInterval() override;
+    void onInterval() override;  // 开始请求服务实例
     void onTimeout() override;
     void onDeferredDelete() final;
 
@@ -92,11 +94,15 @@ private:
     void decodeMetadata(Http::MetadataMapPtr&&) override {}
 
     // Http::StreamCallbacks
+    // 处理失败的情况
     void onResetStream(Http::StreamResetReason reason,
                        absl::string_view transport_failure_reason) override;
+
+    // 高低水位情况，不处理，不属于健康检查
     void onAboveWriteBufferHighWatermark() override {}
     void onBelowWriteBufferLowWatermark() override {}
 
+    // 删除本次事件
     void onEvent(Network::ConnectionEvent event);
 
     class ConnectionCallbackImpl : public Network::ConnectionCallbacks {
@@ -112,7 +118,7 @@ private:
     };
 
     ConnectionCallbackImpl connection_callback_impl_{*this};
-    HttpHealthCheckerImpl& parent_;
+    HttpHealthCheckerImpl& parent_;  // HttpHealthCheckerImpl
     Http::CodecClientPtr client_;
     Http::HeaderMapPtr response_headers_;
     const std::string& hostname_;
@@ -136,10 +142,10 @@ private:
   Http::CodecClient::Type codecClientType(const envoy::type::CodecClientType& type);
 
   const std::string path_;
-  const std::string host_value_;
+  const std::string host_value_;  // http请求中的host选项
   absl::optional<std::string> service_name_;
   Router::HeaderParserPtr request_headers_parser_;
-  const HttpStatusChecker http_status_checker_;
+  const HttpStatusChecker http_status_checker_;  // 在配置文件中，设置了哪些状态值是ok的
 
 protected:
   const Http::CodecClient::Type codec_client_type_;
@@ -148,6 +154,17 @@ protected:
 /**
  * Production implementation of the HTTP health checker that allocates a real codec client.
  */
+
+// 使用方式：
+//   health_checker_->start();
+//   health_checker_->addHostCheckCompleteCb(
+//      [this](const HostSharedPtr& host, HealthTransition changed_state) -> void {
+//        // If we get a health check completion that resulted in a state change, signal to
+//        // update the host sets on all threads.
+//        if (changed_state == HealthTransition::Changed) {
+//          reloadHealthyHosts(host);
+//        }
+//      });
 class ProdHttpHealthCheckerImpl : public HttpHealthCheckerImpl {
 public:
   using HttpHealthCheckerImpl::HttpHealthCheckerImpl;

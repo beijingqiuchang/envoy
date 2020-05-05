@@ -50,6 +50,8 @@ private:
   Stats::Gauge& active_gauge_;
 };
 
+// 过载管理模块
+// 不是针对下游，而是自己的监控
 class OverloadManagerImpl : Logger::Loggable<Logger::Id::main>, public OverloadManager {
 public:
   OverloadManagerImpl(Event::Dispatcher& dispatcher, Stats::Scope& stats_scope,
@@ -101,17 +103,17 @@ private:
 
   bool started_;
   Event::Dispatcher& dispatcher_;
-  ThreadLocal::SlotPtr tls_;
+  ThreadLocal::SlotPtr tls_;  // ThreadLocal::InstanceImpl::allocateSlot(),类型： Bookkeeper<InstanceImpl, SlotImpl>
   const std::chrono::milliseconds refresh_interval_;
   Event::TimerPtr timer_;
   std::unordered_map<std::string, Resource> resources_;
-  std::unordered_map<std::string, OverloadAction> actions_;
+  std::unordered_map<std::string, OverloadAction> actions_;  // action的存储
 
   using ResourceToActionMap = std::unordered_multimap<std::string, std::string>;
-  ResourceToActionMap resource_to_actions_;
+  ResourceToActionMap resource_to_actions_;  // 每个监控资源，对应的trigger
 
   using ActionToCallbackMap = std::unordered_multimap<std::string, ActionCallback>;
-  ActionToCallbackMap action_to_callbacks_;
+  ActionToCallbackMap action_to_callbacks_;  // 每个action对应的处理函数
 };
 
 } // namespace Server

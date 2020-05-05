@@ -18,6 +18,8 @@ StaticClusterImpl::StaticClusterImpl(
   overprovisioning_factor_ = PROTOBUF_GET_WRAPPED_OR_DEFAULT(
       cluster_load_assignment.policy(), overprovisioning_factor, kDefaultOverProvisioningFactor);
 
+  // 遍历每一个Host
+  // ClusterLoadAssignment.endpoints().lb_endpoints().endpoint().address() 存储的是hosts
   for (const auto& locality_lb_endpoint : cluster_load_assignment.endpoints()) {
     priority_state_manager_->initializePriorityFor(locality_lb_endpoint);
     for (const auto& lb_endpoint : locality_lb_endpoint.lb_endpoints()) {
@@ -38,6 +40,7 @@ void StaticClusterImpl::startPreInit() {
 
   auto& priority_state = priority_state_manager_->priorityState();
   for (size_t i = 0; i < priority_state.size(); ++i) {
+    // 对于空的，设置一下
     if (priority_state[i].first == nullptr) {
       priority_state[i].first = std::make_unique<HostVector>();
     }

@@ -18,6 +18,7 @@
 #include "tclap/CmdLine.h"
 
 namespace Envoy {
+    // 启动初始化参数:options_(argc, argv, &MainCommon::hotRestartVersion, spdlog::level::info)
 OptionsImpl::OptionsImpl(int argc, const char* const* argv,
                          const HotRestartVersionCb& hot_restart_version_cb,
                          spdlog::level::level_enum default_log_level)
@@ -118,6 +119,7 @@ OptionsImpl::OptionsImpl(int argc, const char* const* argv,
                                               "bool", cmd);
   cmd.setExceptionHandling(false);
   try {
+    // 解析命令
     cmd.parse(argc, argv);
     count_ = cmd.getArgList().size();
   } catch (TCLAP::ArgException& e) {

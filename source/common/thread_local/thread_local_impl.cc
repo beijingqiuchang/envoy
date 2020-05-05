@@ -111,7 +111,7 @@ void InstanceImpl::registerThread(Event::Dispatcher& dispatcher, bool main_threa
   } else {
     ASSERT(!containsReference(registered_threads_, dispatcher));
     registered_threads_.push_back(dispatcher);
-    dispatcher.post([&dispatcher] { thread_local_data_.dispatcher_ = &dispatcher; });
+    dispatcher.post([&dispatcher] { thread_local_data_.dispatcher_ = &dispatcher; });  // post保证callback会和Dispatcher对象所在线程中执行
   }
 }
 

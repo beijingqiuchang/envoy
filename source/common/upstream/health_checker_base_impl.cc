@@ -248,6 +248,7 @@ void HealthCheckerImplBase::ActiveHealthCheckSession::onDeferredDeleteBase() {
   onDeferredDelete();
 }
 
+// Success时，degraded=false
 void HealthCheckerImplBase::ActiveHealthCheckSession::handleSuccess(bool degraded) {
   // If we are healthy, reset the # of unhealthy to zero.
   num_unhealthy_ = 0;

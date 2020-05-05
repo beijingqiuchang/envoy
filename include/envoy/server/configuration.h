@@ -86,6 +86,7 @@ public:
   /**
    * @return const std::string& profiler output path.
    */
+   // profile_path :https://www.envoyproxy.io/docs/envoy/v1.5.0/api-v1/admin
   virtual const std::string& profilePath() PURE;
 
   /**

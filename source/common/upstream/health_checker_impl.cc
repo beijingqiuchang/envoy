@@ -54,6 +54,7 @@ private:
   Api::Api& api_;
 };
 
+// cluster=EdsClusterImpl
 HealthCheckerSharedPtr HealthCheckerFactory::create(
     const envoy::api::v2::core::HealthCheck& health_check_config, Upstream::Cluster& cluster,
     Runtime::Loader& runtime, Runtime::RandomGenerator& random, Event::Dispatcher& dispatcher,
@@ -93,6 +94,7 @@ HealthCheckerSharedPtr HealthCheckerFactory::create(
   }
 }
 
+// cluster=EdsClusterImpl
 HttpHealthCheckerImpl::HttpHealthCheckerImpl(const Cluster& cluster,
                                              const envoy::api::v2::core::HealthCheck& config,
                                              Event::Dispatcher& dispatcher,
@@ -253,6 +255,7 @@ HttpHealthCheckerImpl::HttpActiveHealthCheckSession::healthCheckResult() {
   ENVOY_CONN_LOG(debug, "hc response={} health_flags={}", *client_, response_code,
                  HostUtility::healthFlagsToString(*host_));
 
+  // 判断response_code是否属于正常返回，不属于，就直接返回失败
   if (!parent_.http_status_checker_.inRange(response_code)) {
     return HealthCheckResult::Failed;
   }

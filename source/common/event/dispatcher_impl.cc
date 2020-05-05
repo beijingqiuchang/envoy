@@ -179,6 +179,8 @@ void DispatcherImpl::post(std::function<void()> callback) {
   }
 
   if (do_post) {
+    // 设置一个超时时间为0，表示立即触发
+    // post_timer_的回调函数：runPostCallbacks
     post_timer_->enableTimer(std::chrono::milliseconds(0));
   }
 }

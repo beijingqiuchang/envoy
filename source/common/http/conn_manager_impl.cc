@@ -108,6 +108,7 @@ ConnectionManagerImpl::ConnectionManagerImpl(ConnectionManagerConfig& config,
       runtime_(runtime), local_info_(local_info), cluster_manager_(cluster_manager),
       listener_stats_(config_.listenerStats()),
       overload_stop_accepting_requests_ref_(
+          // 这里的Server::OverloadActionNames::get()，就是获取的本线程自己的变量，通过引用的方式
           overload_manager ? overload_manager->getThreadLocalOverloadState().getState(
                                  Server::OverloadActionNames::get().StopAcceptingRequests)
                            : Server::OverloadManager::getInactiveState()),

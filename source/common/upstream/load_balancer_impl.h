@@ -85,7 +85,7 @@ protected:
   Runtime::RandomGenerator& random_;
   const uint32_t default_healthy_panic_percent_;
   // The priority-ordered set of hosts to use for load balancing.
-  const PrioritySet& priority_set_;
+  const PrioritySet& priority_set_;  // 待确认
 
 public:
   // Called when a host set at the given priority level is updated. This updates
@@ -120,13 +120,14 @@ protected:
   }
   // The percentage load (0-100) for each priority level when targeting healthy hosts and
   // the percentage load (0-100) for each priority level when targeting degraded hosts.
-  HealthyAndDegradedLoad per_priority_load_;
+  // 通过recalculatePerPriorityState 计算
+  HealthyAndDegradedLoad per_priority_load_;  // 每个优先级要承接的流量
   // The health percentage (0-100) for each priority level.
   HealthyAvailability per_priority_health_;
   // The degraded percentage (0-100) for each priority level.
   DegradedAvailability per_priority_degraded_;
   // Levels which are in panic
-  std::vector<bool> per_priority_panic_;
+  std::vector<bool> per_priority_panic_;  // 每个优先级是否处于恐慌阈值内
 };
 
 class LoadBalancerContextBase : public LoadBalancerContext {

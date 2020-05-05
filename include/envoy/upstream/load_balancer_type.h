@@ -22,7 +22,7 @@ enum class LoadBalancerType {
   RingHash,
   OriginalDst,
   Maglev,
-  ClusterProvided
+  ClusterProvided  // 定制
 };
 
 /**

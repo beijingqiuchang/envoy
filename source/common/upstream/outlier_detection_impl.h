@@ -82,6 +82,10 @@ public:
    * This function updates the bucket to write data to.
    * @return a pointer to the SuccessRateAccumulatorBucket.
    */
+  /*
+   * 把当前的值放到了backup里
+   * 每次计算成功率，都是使用backup里的
+   * */
   SuccessRateAccumulatorBucket* updateCurrentWriter();
   /**
    * This function returns the success rate of a host over a window of time if the request volume is
@@ -392,6 +396,7 @@ private:
   DetectionStats stats_;
   Event::TimerPtr interval_timer_;
   std::list<ChangeStateCb> callbacks_;
+  // host对应的DetectorHostMonitorImpl
   std::unordered_map<HostSharedPtr, DetectorHostMonitorImpl*> host_monitors_;
   EventLoggerSharedPtr event_logger_;
 

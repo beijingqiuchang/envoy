@@ -139,12 +139,14 @@ public:
   std::string name() override { return name_; }
 
 protected:
+  // 禁止直接实例化，但是可以继承类进行实例
   ClusterFactoryImplBase(const std::string& name) : name_(name) {}
 
 private:
   /**
    * Create an instance of ClusterImplBase.
    */
+  // 由各个eds实例定义好
   virtual std::pair<ClusterImplBaseSharedPtr, ThreadAwareLoadBalancerPtr>
   createClusterImpl(const envoy::api::v2::Cluster& cluster, ClusterFactoryContext& context,
                     Server::Configuration::TransportSocketFactoryContext& socket_factory_context,

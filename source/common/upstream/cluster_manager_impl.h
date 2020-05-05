@@ -140,6 +140,7 @@ private:
   void onClusterInit(Cluster& cluster);
 
   ClusterManager& cm_;
+  // [this](Cluster& cluster) { onClusterInit(cluster); }
   std::function<void(Cluster& cluster)> per_cluster_init_callback_;
   CdsApi* cds_{};
   std::function<void()> initialized_callback_;
@@ -321,6 +322,7 @@ private:
       // factory will create an LB on construction and use it forever.
       LoadBalancerFactorySharedPtr lb_factory_;
       // Current active LB.
+      // std::make_unique<LeastRequestLoadBalancer>
       LoadBalancerPtr lb_;
       ClusterInfoConstSharedPtr cluster_info_;
       Http::AsyncClientImpl http_async_client_;
@@ -381,12 +383,13 @@ private:
       }
     }
 
-    const envoy::api::v2::Cluster cluster_config_;
-    const uint64_t config_hash_;
+    const envoy::api::v2::Cluster cluster_config_;  // cluster_ 生成时对应的配置
+    const uint64_t config_hash_;  // 由cluster_config生成
     const std::string version_info_;
     const bool added_via_api_;
-    ClusterSharedPtr cluster_;
+    ClusterSharedPtr cluster_;  // 保存的cluster,cds: StaticClusterFactory, eds: EdsClusterImpl
     // Optional thread aware LB depending on the LB type. Not all clusters have one.
+    // std::make_unique<RingHashLoadBalancer>后面用这个做分析
     ThreadAwareLoadBalancerPtr thread_aware_lb_;
     SystemTime last_updated_;
   };
@@ -460,14 +463,14 @@ private:
   Runtime::RandomGenerator& random_;
 
 protected:
-  ClusterMap active_clusters_;
+  ClusterMap active_clusters_;  // 存储着eds,cds，etc  , ClusterData
 
 private:
   ClusterMap warming_clusters_;
   envoy::api::v2::core::BindConfig bind_config_;
   Outlier::EventLoggerSharedPtr outlier_event_logger_;
   const LocalInfo::LocalInfo& local_info_;
-  CdsApiPtr cds_api_;
+  CdsApiPtr cds_api_;  // CdsApiImpl
   ClusterManagerStats cm_stats_;
   ClusterManagerInitHelper init_helper_;
   Config::GrpcMuxSharedPtr ads_mux_;

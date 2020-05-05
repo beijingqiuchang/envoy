@@ -223,7 +223,7 @@ private:
   }
 
   ListenerManagerImpl& parent_;
-  Network::Address::InstanceConstSharedPtr address_;
+  Network::Address::InstanceConstSharedPtr address_;  // Address::Ipv4Instance
   FilterChainManagerImpl filter_chain_manager_;
 
   Network::ListenSocketFactorySharedPtr socket_factory_;

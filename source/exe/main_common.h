@@ -72,14 +72,14 @@ protected:
   // the ifdef be inconsistent across build-system boundaries.
   Grpc::GoogleGrpcContext google_grpc_context_;
   const Envoy::OptionsImpl& options_;
-  Server::ComponentFactory& component_factory_;
+  Server::ComponentFactory& component_factory_;  // ProdComponentFactory
   Thread::ThreadFactory& thread_factory_;
   Filesystem::Instance& file_system_;
   Stats::SymbolTablePtr symbol_table_;
   Stats::AllocatorImpl stats_allocator_;
 
   std::unique_ptr<ThreadLocal::InstanceImpl> tls_;
-  std::unique_ptr<Server::HotRestart> restarter_;
+  std::unique_ptr<Server::HotRestart> restarter_;  // HotRestartNopImpl
   std::unique_ptr<Stats::ThreadLocalStoreImpl> stats_store_;
   std::unique_ptr<Logger::Context> logging_context_;
   std::unique_ptr<Init::Manager> init_manager_{std::make_unique<Init::ManagerImpl>("Server")};

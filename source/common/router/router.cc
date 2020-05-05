@@ -567,7 +567,7 @@ Http::ConnectionPool::Instance* Filter::getConnPool() {
   Http::Protocol protocol = cluster_->upstreamHttpProtocol(callbacks_->streamInfo().protocol());
   transport_socket_options_ = Network::TransportSocketOptionsUtility::fromFilterState(
       callbacks_->streamInfo().filterState());
-
+  // ClusterManagerImpl::httpConnPoolForCluster
   return config_.cm_.httpConnPoolForCluster(route_entry_->clusterName(), route_entry_->priority(),
                                             protocol, this);
 }
