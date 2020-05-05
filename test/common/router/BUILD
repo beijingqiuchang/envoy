@@ -15,6 +15,7 @@ envoy_package()
 
 envoy_cc_test(
     name = "config_impl_test",
+    tags = ["fails_on_windows"],
     deps = [":config_impl_test_lib"],
 )
 
@@ -27,14 +28,16 @@ envoy_cc_test_library(
         "//source/common/http:header_map_lib",
         "//source/common/http:headers_lib",
         "//source/common/router:config_lib",
-        "//source/extensions/filters/http/common:empty_http_filter_config_lib",
+        "//source/common/stream_info:filter_state_lib",
+        "//test/extensions/filters/http/common:empty_http_filter_config_lib",
         "//test/fuzz:utility_lib",
         "//test/mocks/server:server_mocks",
         "//test/test_common:environment_lib",
         "//test/test_common:registry_lib",
+        "//test/test_common:test_runtime_lib",
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/api/v2:pkg_cc_proto",
-        "@envoy_api//envoy/api/v2/route:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/type/v3:pkg_cc_proto",
     ],
 )
 
@@ -43,7 +46,7 @@ envoy_proto_library(
     srcs = ["header_parser_fuzz.proto"],
     deps = [
         "//test/fuzz:common_proto",
-        "@envoy_api//envoy/api/v2/core:pkg",
+        "@envoy_api//envoy/config/core/v3:pkg",
     ],
 )
 
@@ -68,12 +71,16 @@ envoy_cc_test(
         "//source/common/router:rds_lib",
         "//source/server/http:admin_lib",
         "//test/mocks/local_info:local_info_mocks",
+        "//test/mocks/protobuf:protobuf_mocks",
         "//test/mocks/server:server_mocks",
         "//test/mocks/thread_local:thread_local_mocks",
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:simulated_time_system_lib",
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/admin/v2alpha:pkg_cc_proto",
+        "@envoy_api//envoy/admin/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
+        "@envoy_api//envoy/service/discovery/v3:pkg_cc_proto",
     ],
 )
 
@@ -87,6 +94,8 @@ envoy_cc_test(
         "//source/common/router:scoped_config_lib",
         "//test/mocks/router:router_mocks",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
     ],
 )
 
@@ -99,6 +108,7 @@ envoy_cc_test(
     deps = [
         "//include/envoy/config:subscription_interface",
         "//include/envoy/init:manager_interface",
+        "//source/common/config:api_version_lib",
         "//source/common/config:utility_lib",
         "//source/common/http:message_lib",
         "//source/common/json:json_loader_lib",
@@ -106,11 +116,17 @@ envoy_cc_test(
         "//source/server/http:admin_lib",
         "//test/mocks/config:config_mocks",
         "//test/mocks/init:init_mocks",
+        "//test/mocks/protobuf:protobuf_mocks",
         "//test/mocks/router:router_mocks",
         "//test/mocks/server:server_mocks",
         "//test/test_common:simulated_time_system_lib",
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/admin/v2alpha:pkg_cc_proto",
+        "@envoy_api//envoy/admin/v3:pkg_cc_proto",
+        "@envoy_api//envoy/api/v2:pkg_cc_proto",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
+        "@envoy_api//envoy/service/discovery/v3:pkg_cc_proto",
     ],
 )
 
@@ -130,7 +146,8 @@ envoy_cc_test(
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:simulated_time_system_lib",
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/admin/v2alpha:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/service/discovery/v3:pkg_cc_proto",
     ],
 )
 
@@ -145,6 +162,7 @@ envoy_cc_test(
         "//test/mocks/runtime:runtime_mocks",
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
     ],
 )
 
@@ -153,7 +171,7 @@ envoy_proto_library(
     srcs = ["route_fuzz.proto"],
     deps = [
         "//test/fuzz:common_proto",
-        "@envoy_api//envoy/api/v2:pkg",
+        "@envoy_api//envoy/config/route/v3:pkg",
     ],
 )
 
@@ -204,12 +222,14 @@ envoy_cc_fuzz_test(
     name = "route_fuzz_test",
     srcs = ["route_fuzz_test.cc"],
     corpus = ":route_corpus",
+    # The corpus_from_config_impl currently does not work, the tests it runs do not pass
+    tags = ["skip_on_windows"],
     deps = [
         ":route_fuzz_proto_cc_proto",
         "//source/common/router:config_lib",
         "//test/fuzz:utility_lib",
         "//test/mocks/server:server_mocks",
-        "@envoy_api//envoy/api/v2:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
     ],
 )
 
@@ -226,19 +246,21 @@ envoy_cc_test(
         "//test/mocks/router:router_mocks",
         "//test/mocks/server:server_mocks",
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/api/v2/route:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
     ],
 )
 
 envoy_cc_test(
     name = "router_test",
     srcs = ["router_test.cc"],
+    tags = ["fails_on_windows"],
     deps = [
         "//source/common/buffer:buffer_lib",
         "//source/common/http:context_lib",
         "//source/common/network:application_protocol_lib",
         "//source/common/network:utility_lib",
         "//source/common/router:router_lib",
+        "//source/common/stream_info:uint32_accessor_lib",
         "//source/common/upstream:upstream_includes",
         "//source/common/upstream:upstream_lib",
         "//test/common/http:common_lib",
@@ -253,6 +275,9 @@ envoy_cc_test(
         "//test/test_common:simulated_time_system_lib",
         "//test/test_common:test_runtime_lib",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/transport_sockets/tls/v3:pkg_cc_proto",
+        "@envoy_api//envoy/type/v3:pkg_cc_proto",
     ],
 )
 
@@ -260,6 +285,7 @@ envoy_cc_test(
     name = "router_upstream_log_test",
     srcs = ["router_upstream_log_test.cc"],
     external_deps = ["abseil_optional"],
+    tags = ["fails_on_windows"],
     deps = [
         "//source/common/buffer:buffer_lib",
         "//source/common/network:utility_lib",
@@ -279,6 +305,9 @@ envoy_cc_test(
         "//test/mocks/ssl:ssl_mocks",
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/config/accesslog/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
     ],
 )
 
@@ -294,6 +323,26 @@ envoy_cc_test(
 )
 
 envoy_cc_test(
+    name = "upstream_request_test",
+    srcs = ["upstream_request_test.cc"],
+    deps = [
+        "//source/common/buffer:buffer_lib",
+        "//source/common/router:router_lib",
+        "//source/common/upstream:upstream_includes",
+        "//source/common/upstream:upstream_lib",
+        "//test/common/http:common_lib",
+        "//test/mocks/http:http_mocks",
+        "//test/mocks/network:network_mocks",
+        "//test/mocks/router:router_mocks",
+        "//test/mocks/server:server_mocks",
+        "//test/mocks/upstream:upstream_mocks",
+        "//test/test_common:environment_lib",
+        "//test/test_common:simulated_time_system_lib",
+        "//test/test_common:utility_lib",
+    ],
+)
+
+envoy_cc_test(
     name = "header_formatter_test",
     srcs = ["header_formatter_test.cc"],
     deps = [
@@ -303,13 +352,15 @@ envoy_cc_test(
         "//source/common/router:string_accessor_lib",
         "//source/common/stream_info:filter_state_lib",
         "//test/common/stream_info:test_int_accessor_lib",
+        "//test/mocks/api:api_mocks",
         "//test/mocks/http:http_mocks",
         "//test/mocks/ssl:ssl_mocks",
         "//test/mocks/stream_info:stream_info_mocks",
         "//test/mocks/upstream:upstream_mocks",
+        "//test/test_common:threadsafe_singleton_injector_lib",
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/api/v2:pkg_cc_proto",
-        "@envoy_api//envoy/api/v2/core:pkg_cc_proto",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
     ],
 )
 

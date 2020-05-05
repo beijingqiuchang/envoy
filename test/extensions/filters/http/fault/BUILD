@@ -28,10 +28,12 @@ envoy_extension_cc_test(
         "//test/common/http:common_lib",
         "//test/mocks/http:http_mocks",
         "//test/mocks/runtime:runtime_mocks",
+        "//test/mocks/stats:stats_mocks",
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:simulated_time_system_lib",
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/config/filter/http/fault/v2:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/fault/v3:pkg_cc_proto",
+        "@envoy_api//envoy/type/v3:pkg_cc_proto",
     ],
 )
 
@@ -43,7 +45,8 @@ envoy_extension_cc_test(
         ":utility_lib",
         "//source/extensions/filters/http/fault:config",
         "//test/mocks/server:server_mocks",
-        "@envoy_api//envoy/config/filter/http/fault/v2:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/fault/v3:pkg_cc_proto",
+        "@envoy_api//envoy/type/v3:pkg_cc_proto",
     ],
 )
 
@@ -51,6 +54,7 @@ envoy_extension_cc_test(
     name = "fault_filter_integration_test",
     srcs = ["fault_filter_integration_test.cc"],
     extension_name = "envoy.filters.http.fault",
+    tags = ["fails_on_windows"],
     deps = [
         "//source/extensions/filters/http/fault:config",
         "//test/integration:http_protocol_integration_lib",
@@ -62,6 +66,6 @@ envoy_cc_test_library(
     hdrs = ["utility.h"],
     deps = [
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/config/filter/http/fault/v2:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/fault/v3:pkg_cc_proto",
     ],
 )

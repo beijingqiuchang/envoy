@@ -1,5 +1,7 @@
 #include "extensions/filters/http/ext_authz/ext_authz.h"
 
+#include "envoy/config/core/v3/base.pb.h"
+
 #include "common/common/assert.h"
 #include "common/common/enum_to_int.h"
 #include "common/http/utility.h"
@@ -29,28 +31,12 @@ void FilterConfigPerRoute::merge(const FilterConfigPerRoute& other) {
   }
 }
 
-void Filter::initiateCall(const Http::HeaderMap& headers) {
+void Filter::initiateCall(const Http::RequestHeaderMap& headers,
+                          const Router::RouteConstSharedPtr& route) {
   if (filter_return_ == FilterReturn::StopDecoding) {
     return;
   }
 
-  Router::RouteConstSharedPtr route = callbacks_->route();
-  if (route == nullptr || route->routeEntry() == nullptr) {
-    return;
-  }
-  cluster_ = callbacks_->clusterInfo();
-
-  // Fast route - if we are disabled, no need to merge.
-  const FilterConfigPerRoute* specific_per_route_config =
-      Http::Utility::resolveMostSpecificPerFilterConfig<FilterConfigPerRoute>(
-          HttpFilterNames::get().ExtAuthorization, route);
-  if (specific_per_route_config != nullptr) {
-    if (specific_per_route_config->disabled()) {
-      return;
-    }
-  }
-
-  // We are not disabled - get a merged view of the config:
   auto&& maybe_merged_per_route_config =
       Http::Utility::getMergedPerFilterConfig<FilterConfigPerRoute>(
           HttpFilterNames::get().ExtAuthorization, route,
@@ -64,7 +50,7 @@ void Filter::initiateCall(const Http::HeaderMap& headers) {
   }
 
   // If metadata_context_namespaces is specified, pass matching metadata to the ext_authz service
-  envoy::api::v2::core::Metadata metadata_context;
+  envoy::config::core::v3::Metadata metadata_context;
   const auto& request_metadata = callbacks_->streamInfo().dynamicMetadata().filter_metadata();
   for (const auto& context_key : config_->metadataContextNamespaces()) {
     const auto& metadata_it = request_metadata.find(context_key);
@@ -81,13 +67,17 @@ void Filter::initiateCall(const Http::HeaderMap& headers) {
   state_ = State::Calling;
   filter_return_ = FilterReturn::StopDecoding; // Don't let the filter chain continue as we are
                                                // going to invoke check call.
+  cluster_ = callbacks_->clusterInfo();
   initiating_call_ = true;
-  client_->check(*this, check_request_, callbacks_->activeSpan());
+  client_->check(*this, check_request_, callbacks_->activeSpan(), callbacks_->streamInfo());
   initiating_call_ = false;
 }
 
-Http::FilterHeadersStatus Filter::decodeHeaders(Http::HeaderMap& headers, bool end_stream) {
-  if (!config_->filterEnabled()) {
+Http::FilterHeadersStatus Filter::decodeHeaders(Http::RequestHeaderMap& headers, bool end_stream) {
+  Router::RouteConstSharedPtr route = callbacks_->route();
+  skip_check_ = skipCheckForRoute(route);
+
+  if (!config_->filterEnabled() || skip_check_) {
     return Http::FilterHeadersStatus::Continue;
   }
 
@@ -103,14 +93,15 @@ Http::FilterHeadersStatus Filter::decodeHeaders(Http::HeaderMap& headers, bool e
     return Http::FilterHeadersStatus::StopIteration;
   }
 
-  initiateCall(headers);
+  // Initiate a call to the authorization server since we are not disabled.
+  initiateCall(headers, route);
   return filter_return_ == FilterReturn::StopDecoding
              ? Http::FilterHeadersStatus::StopAllIterationAndWatermark
              : Http::FilterHeadersStatus::Continue;
 }
 
 Http::FilterDataStatus Filter::decodeData(Buffer::Instance& data, bool end_stream) {
-  if (buffer_data_) {
+  if (buffer_data_ && !skip_check_) {
     const bool buffer_is_full = isBufferFull();
     if (end_stream || buffer_is_full) {
       ENVOY_STREAM_LOG(debug, "ext_authz filter finished buffering the request since {}",
@@ -119,7 +110,7 @@ Http::FilterDataStatus Filter::decodeData(Buffer::Instance& data, bool end_strea
         // Make sure data is available in initiateCall.
         callbacks_->addDecodedData(data, true);
       }
-      initiateCall(*request_headers_);
+      initiateCall(*request_headers_, callbacks_->route());
       return filter_return_ == FilterReturn::StopDecoding
                  ? Http::FilterDataStatus::StopIterationAndWatermark
                  : Http::FilterDataStatus::Continue;
@@ -131,11 +122,11 @@ Http::FilterDataStatus Filter::decodeData(Buffer::Instance& data, bool end_strea
   return Http::FilterDataStatus::Continue;
 }
 
-Http::FilterTrailersStatus Filter::decodeTrailers(Http::HeaderMap&) {
-  if (buffer_data_) {
+Http::FilterTrailersStatus Filter::decodeTrailers(Http::RequestTrailerMap&) {
+  if (buffer_data_ && !skip_check_) {
     if (filter_return_ != FilterReturn::StopDecoding) {
       ENVOY_STREAM_LOG(debug, "ext_authz filter finished buffering the request", *callbacks_);
-      initiateCall(*request_headers_);
+      initiateCall(*request_headers_, callbacks_->route());
     }
     return filter_return_ == FilterReturn::StopDecoding ? Http::FilterTrailersStatus::StopIteration
                                                         : Http::FilterTrailersStatus::Continue;
@@ -169,19 +160,14 @@ void Filter::onComplete(Filters::Common::ExtAuthz::ResponsePtr&& response) {
       callbacks_->clearRouteCache();
     }
     for (const auto& header : response->headers_to_add) {
-      ENVOY_STREAM_LOG(trace, " '{}':'{}'", *callbacks_, header.first.get(), header.second);
-      Http::HeaderEntry* header_to_modify = request_headers_->get(header.first);
-      if (header_to_modify) {
-        header_to_modify->value(header.second.c_str(), header.second.size());
-      } else {
-        request_headers_->addCopy(header.first, header.second);
-      }
+      ENVOY_STREAM_LOG(trace, "'{}':'{}'", *callbacks_, header.first.get(), header.second);
+      request_headers_->setCopy(header.first, header.second);
     }
     for (const auto& header : response->headers_to_append) {
-      Http::HeaderEntry* header_to_modify = request_headers_->get(header.first);
+      const Http::HeaderEntry* header_to_modify = request_headers_->get(header.first);
       if (header_to_modify) {
-        ENVOY_STREAM_LOG(trace, " '{}':'{}'", *callbacks_, header.first.get(), header.second);
-        Http::HeaderMapImpl::appendToHeader(header_to_modify->value(), header.second);
+        ENVOY_STREAM_LOG(trace, "'{}':'{}'", *callbacks_, header.first.get(), header.second);
+        request_headers_->appendCopy(header.first, header.second);
       }
     }
     if (cluster_) {
@@ -266,7 +252,7 @@ void Filter::onComplete(Filters::Common::ExtAuthz::ResponsePtr&& response) {
   }
 }
 
-bool Filter::isBufferFull() {
+bool Filter::isBufferFull() const {
   const auto* buffer = callbacks_->decodingBuffer();
   if (config_->allowPartialMessage() && buffer != nullptr) {
     return buffer->length() >= config_->maxRequestBytes();
@@ -279,6 +265,21 @@ void Filter::continueDecoding() {
   if (!initiating_call_) {
     callbacks_->continueDecoding();
   }
+}
+
+bool Filter::skipCheckForRoute(const Router::RouteConstSharedPtr& route) const {
+  if (route == nullptr || route->routeEntry() == nullptr) {
+    return true;
+  }
+
+  const auto* specific_per_route_config =
+      Http::Utility::resolveMostSpecificPerFilterConfig<FilterConfigPerRoute>(
+          HttpFilterNames::get().ExtAuthorization, route);
+  if (specific_per_route_config != nullptr) {
+    return specific_per_route_config->disabled();
+  }
+
+  return false;
 }
 
 } // namespace ExtAuthz

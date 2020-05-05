@@ -1,6 +1,8 @@
 // Note: this should be run with --compilation_mode=opt, and would benefit from a
 // quiescent system with disabled cstate power management.
 
+#include "envoy/config/metrics/v3/stats.pb.h"
+
 #include "common/common/logger.h"
 #include "common/common/thread.h"
 #include "common/event/dispatcher_impl.h"
@@ -48,7 +50,7 @@ public:
   }
 
   void initThreading() {
-    dispatcher_ = api_->allocateDispatcher();
+    dispatcher_ = api_->allocateDispatcher("test_thread");
     tls_ = std::make_unique<ThreadLocal::InstanceImpl>();
     store_.initializeThreading(*dispatcher_, *tls_);
   }
@@ -61,7 +63,7 @@ private:
   Api::ApiPtr api_;
   Event::DispatcherPtr dispatcher_;
   std::unique_ptr<ThreadLocal::InstanceImpl> tls_;
-  envoy::config::metrics::v2::StatsConfig stats_config_;
+  envoy::config::metrics::v3::StatsConfig stats_config_;
   std::vector<std::unique_ptr<Stats::StatNameStorage>> stat_names_;
 };
 

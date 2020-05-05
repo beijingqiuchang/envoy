@@ -5,12 +5,20 @@
 #include <string>
 #include <vector>
 
+#include "envoy/admin/v3/server_info.pb.h"
 #include "envoy/common/exception.h"
-#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
+#include "envoy/config/bootstrap/v3/bootstrap.pb.h"
+#include "envoy/config/filter/http/buffer/v2/buffer.pb.h"
+#include "envoy/config/typed_config.h"
+#include "envoy/extensions/filters/http/buffer/v3/buffer.pb.h"
+#include "envoy/server/filter_config.h"
 
 #include "common/common/utility.h"
 
 #include "server/options_impl.h"
+
+#include "extensions/filters/http/buffer/buffer_filter.h"
+#include "extensions/filters/http/well_known_names.h"
 
 #if defined(__linux__)
 #include <sched.h>
@@ -19,6 +27,7 @@
 #include "test/mocks/api/mocks.h"
 #include "test/test_common/environment.h"
 #include "test/test_common/logging.h"
+#include "test/test_common/registry.h"
 #include "test/test_common/threadsafe_singleton_injector.h"
 #include "test/test_common/utility.h"
 
@@ -32,15 +41,17 @@ namespace {
 class OptionsImplTest : public testing::Test {
 
 public:
-  // Do the ugly work of turning a std::string into a char** and create an OptionsImpl. Args are
+  // Do the ugly work of turning a std::string into a vector and create an OptionsImpl. Args are
   // separated by a single space: no fancy quoting or escaping.
   std::unique_ptr<OptionsImpl> createOptionsImpl(const std::string& args) {
     std::vector<std::string> words = TestUtility::split(args, ' ');
-    std::vector<const char*> argv;
-    std::transform(words.cbegin(), words.cend(), std::back_inserter(argv),
-                   [](const std::string& arg) { return arg.c_str(); });
     return std::make_unique<OptionsImpl>(
-        argv.size(), argv.data(), [](bool) { return "1"; }, spdlog::level::warn);
+        std::move(words), [](bool) { return "1"; }, spdlog::level::warn);
+  }
+
+  std::unique_ptr<OptionsImpl> createOptionsImpl(std::vector<std::string> args) {
+    return std::make_unique<OptionsImpl>(
+        std::move(args), [](bool) { return "1"; }, spdlog::level::warn);
   }
 };
 
@@ -58,7 +69,7 @@ TEST_F(OptionsImplTest, InvalidCommandLine) {
                           "Couldn't find match for argument");
 }
 
-TEST_F(OptionsImplTest, v1Disallowed) {
+TEST_F(OptionsImplTest, V1Disallowed) {
   std::unique_ptr<OptionsImpl> options = createOptionsImpl(
       "envoy --mode validate --concurrency 2 -c hello --admin-address-path path --restart-epoch 1 "
       "--local-address-ip-version v6 -l info --service-cluster cluster --service-node node "
@@ -75,7 +86,7 @@ TEST_F(OptionsImplTest, All) {
       "--file-flush-interval-msec 9000 "
       "--drain-time-s 60 --log-format [%v] --parent-shutdown-time-s 90 --log-path /foo/bar "
       "--disable-hot-restart --cpuset-threads --allow-unknown-static-fields "
-      "--reject-unknown-dynamic-fields");
+      "--reject-unknown-dynamic-fields --use-fake-symbol-table 0");
   EXPECT_EQ(Server::Mode::Validate, options->mode());
   EXPECT_EQ(2U, options->concurrency());
   EXPECT_EQ("hello", options->configPath());
@@ -84,7 +95,7 @@ TEST_F(OptionsImplTest, All) {
   EXPECT_EQ(1U, options->restartEpoch());
   EXPECT_EQ(spdlog::level::info, options->logLevel());
   EXPECT_EQ(2, options->componentLogLevels().size());
-  EXPECT_EQ("[%v]", options->logFormat());
+  EXPECT_EQ("[[%g:%#] %v]", options->logFormat());
   EXPECT_EQ("/foo/bar", options->logPath());
   EXPECT_EQ("cluster", options->serviceClusterName());
   EXPECT_EQ("node", options->serviceNodeName());
@@ -96,7 +107,7 @@ TEST_F(OptionsImplTest, All) {
   EXPECT_TRUE(options->cpusetThreadsEnabled());
   EXPECT_TRUE(options->allowUnknownStaticFields());
   EXPECT_TRUE(options->rejectUnknownDynamicFields());
-  EXPECT_TRUE(options->fakeSymbolTableEnabled());
+  EXPECT_FALSE(options->fakeSymbolTableEnabled());
 
   options = createOptionsImpl("envoy --mode init_only");
   EXPECT_EQ(Server::Mode::InitOnly, options->mode());
@@ -132,7 +143,7 @@ TEST_F(OptionsImplTest, SetAll) {
   options->setBaseId(109876);
   options->setConcurrency(42);
   options->setConfigPath("foo");
-  envoy::config::bootstrap::v2::Bootstrap bootstrap_foo{};
+  envoy::config::bootstrap::v3::Bootstrap bootstrap_foo{};
   bootstrap_foo.mutable_node()->set_id("foo");
   options->setConfigProto(bootstrap_foo);
   options->setConfigYaml("bogus:");
@@ -159,7 +170,7 @@ TEST_F(OptionsImplTest, SetAll) {
   EXPECT_EQ(109876, options->baseId());
   EXPECT_EQ(42U, options->concurrency());
   EXPECT_EQ("foo", options->configPath());
-  envoy::config::bootstrap::v2::Bootstrap bootstrap_bar{};
+  envoy::config::bootstrap::v3::Bootstrap bootstrap_bar{};
   bootstrap_bar.mutable_node()->set_id("foo");
   EXPECT_TRUE(TestUtility::protoEqual(bootstrap_bar, options->configProto()));
   EXPECT_EQ("bogus:", options->configYaml());
@@ -191,7 +202,7 @@ TEST_F(OptionsImplTest, SetAll) {
   EXPECT_EQ(options->configPath(), command_line_options->config_path());
   EXPECT_EQ(options->configYaml(), command_line_options->config_yaml());
   EXPECT_EQ(options->adminAddressPath(), command_line_options->admin_address_path());
-  EXPECT_EQ(envoy::admin::v2alpha::CommandLineOptions::v6,
+  EXPECT_EQ(envoy::admin::v3::CommandLineOptions::v6,
             command_line_options->local_address_ip_version());
   EXPECT_EQ(options->drainTime().count(), command_line_options->drain_time().seconds());
   EXPECT_EQ(spdlog::level::to_string_view(options->logLevel()), command_line_options->log_level());
@@ -202,7 +213,7 @@ TEST_F(OptionsImplTest, SetAll) {
   EXPECT_EQ(options->restartEpoch(), command_line_options->restart_epoch());
   EXPECT_EQ(options->fileFlushIntervalMsec().count() / 1000,
             command_line_options->file_flush_interval().seconds());
-  EXPECT_EQ(envoy::admin::v2alpha::CommandLineOptions::Validate, command_line_options->mode());
+  EXPECT_EQ(envoy::admin::v3::CommandLineOptions::Validate, command_line_options->mode());
   EXPECT_EQ(options->serviceClusterName(), command_line_options->service_cluster());
   EXPECT_EQ(options->serviceNodeName(), command_line_options->service_node());
   EXPECT_EQ(options->serviceZone(), command_line_options->service_zone());
@@ -218,6 +229,7 @@ TEST_F(OptionsImplTest, DefaultParams) {
   EXPECT_EQ("", options->adminAddressPath());
   EXPECT_EQ(Network::Address::IpVersion::v4, options->localAddressIpVersion());
   EXPECT_EQ(Server::Mode::Serve, options->mode());
+  EXPECT_EQ(spdlog::level::warn, options->logLevel());
   EXPECT_FALSE(options->hotRestartDisabled());
   EXPECT_FALSE(options->cpusetThreadsEnabled());
 
@@ -227,9 +239,9 @@ TEST_F(OptionsImplTest, DefaultParams) {
   EXPECT_EQ(600, command_line_options->drain_time().seconds());
   EXPECT_EQ(900, command_line_options->parent_shutdown_time().seconds());
   EXPECT_EQ("", command_line_options->admin_address_path());
-  EXPECT_EQ(envoy::admin::v2alpha::CommandLineOptions::v4,
+  EXPECT_EQ(envoy::admin::v3::CommandLineOptions::v4,
             command_line_options->local_address_ip_version());
-  EXPECT_EQ(envoy::admin::v2alpha::CommandLineOptions::Serve, command_line_options->mode());
+  EXPECT_EQ(envoy::admin::v3::CommandLineOptions::Serve, command_line_options->mode());
   EXPECT_FALSE(command_line_options->disable_hot_restart());
   EXPECT_FALSE(command_line_options->cpuset_threads());
   EXPECT_FALSE(command_line_options->allow_unknown_static_fields());
@@ -249,7 +261,27 @@ TEST_F(OptionsImplTest, OptionsAreInSyncWithProto) {
   // 4. allow-unknown-fields  - deprecated alias of allow-unknown-static-fields.
   // 5. use-fake-symbol-table - short-term override for rollout of real symbol-table implementation.
   // 6. hot restart version - print the hot restart version and exit.
-  EXPECT_EQ(options->count() - 6, command_line_options->GetDescriptor()->field_count());
+  // 7. log-format-prefix-with-location - short-term override for rollout of dynamic log format.
+  EXPECT_EQ(options->count() - 7, command_line_options->GetDescriptor()->field_count());
+}
+
+TEST_F(OptionsImplTest, OptionsFromArgv) {
+  const std::array<const char*, 3> args{"envoy", "-c", "hello"};
+  std::unique_ptr<OptionsImpl> options = std::make_unique<OptionsImpl>(
+      static_cast<int>(args.size()), args.data(), [](bool) { return "1"; }, spdlog::level::warn);
+  // Spot check that the arguments were parsed.
+  EXPECT_EQ("hello", options->configPath());
+}
+
+TEST_F(OptionsImplTest, OptionsFromArgvPrefix) {
+  const std::array<const char*, 5> args{"envoy", "-c", "hello", "--admin-address-path", "goodbye"};
+  std::unique_ptr<OptionsImpl> options = std::make_unique<OptionsImpl>(
+      static_cast<int>(args.size()) - 2, // Pass in only a prefix of the args
+      args.data(), [](bool) { return "1"; }, spdlog::level::warn);
+  EXPECT_EQ("hello", options->configPath());
+  // This should still have the default value since the extra arguments are
+  // ignored.
+  EXPECT_EQ("", options->adminAddressPath());
 }
 
 TEST_F(OptionsImplTest, BadCliOption) {
@@ -281,10 +313,16 @@ TEST_F(OptionsImplTest, InvalidComponent) {
                           "error: invalid component specified 'blah'");
 }
 
-TEST_F(OptionsImplTest, InvalidLogLevel) {
+TEST_F(OptionsImplTest, InvalidComponentLogLevel) {
   std::unique_ptr<OptionsImpl> options = createOptionsImpl("envoy --mode init_only");
   EXPECT_THROW_WITH_REGEX(options->parseComponentLogLevels("upstream:blah,connection:trace"),
                           MalformedArgvException, "error: invalid log level specified 'blah'");
+}
+
+TEST_F(OptionsImplTest, ComponentLogLevelContainsBlank) {
+  std::unique_ptr<OptionsImpl> options = createOptionsImpl("envoy --mode init_only");
+  EXPECT_THROW_WITH_REGEX(options->parseComponentLogLevels("upstream:,connection:trace"),
+                          MalformedArgvException, "error: invalid log level specified ''");
 }
 
 TEST_F(OptionsImplTest, InvalidComponentLogLevelStructure) {
@@ -298,6 +336,26 @@ TEST_F(OptionsImplTest, IncompleteComponentLogLevel) {
   std::unique_ptr<OptionsImpl> options = createOptionsImpl("envoy --mode init_only");
   EXPECT_THROW_WITH_REGEX(options->parseComponentLogLevels("upstream"), MalformedArgvException,
                           "component log level not correctly specified 'upstream'");
+}
+
+TEST_F(OptionsImplTest, InvalidLogLevel) {
+  EXPECT_THROW_WITH_REGEX(createOptionsImpl("envoy -l blah"), MalformedArgvException,
+                          "error: invalid log level specified 'blah'");
+}
+
+TEST_F(OptionsImplTest, ValidLogLevel) {
+  std::unique_ptr<OptionsImpl> options = createOptionsImpl("envoy -l critical");
+  EXPECT_EQ(spdlog::level::level_enum::critical, options->logLevel());
+}
+
+TEST_F(OptionsImplTest, WarnIsValidLogLevel) {
+  std::unique_ptr<OptionsImpl> options = createOptionsImpl("envoy -l warn");
+  EXPECT_EQ(spdlog::level::level_enum::warn, options->logLevel());
+}
+
+TEST_F(OptionsImplTest, AllowedLogLevels) {
+  EXPECT_EQ("[trace][debug][info][warning|warn][error][critical][off]",
+            OptionsImpl::allowedLogLevels());
 }
 
 // Test that the test constructor comes up with the same default values as the main constructor.
@@ -347,6 +405,30 @@ TEST_F(OptionsImplTest, SetBothConcurrencyAndCpuset) {
 TEST_F(OptionsImplTest, SetCpusetOnly) {
   std::unique_ptr<OptionsImpl> options = createOptionsImpl("envoy -c hello --cpuset-threads");
   EXPECT_NE(options->concurrency(), 0);
+}
+
+TEST_F(OptionsImplTest, LogFormatDefault) {
+  std::unique_ptr<OptionsImpl> options = createOptionsImpl({"envoy", "-c", "hello"});
+  EXPECT_EQ(options->logFormat(), "[%Y-%m-%d %T.%e][%t][%l][%n] [%g:%#] %v");
+}
+
+TEST_F(OptionsImplTest, LogFormatDefaultNoPrefix) {
+  std::unique_ptr<OptionsImpl> options =
+      createOptionsImpl({"envoy", "-c", "hello", "--log-format-prefix-with-location", "0"});
+  EXPECT_EQ(options->logFormat(), "[%Y-%m-%d %T.%e][%t][%l][%n] %v");
+}
+
+TEST_F(OptionsImplTest, LogFormatOverride) {
+  std::unique_ptr<OptionsImpl> options =
+      createOptionsImpl({"envoy", "-c", "hello", "--log-format", "%%v %v %t %v"});
+  EXPECT_EQ(options->logFormat(), "%%v [%g:%#] %v %t [%g:%#] %v");
+}
+
+TEST_F(OptionsImplTest, LogFormatOverrideNoPrefix) {
+  std::unique_ptr<OptionsImpl> options =
+      createOptionsImpl({"envoy", "-c", "hello", "--log-format", "%%v %v %t %v",
+                         "--log-format-prefix-with-location 0"});
+  EXPECT_EQ(options->logFormat(), "%%v %v %t %v");
 }
 
 #if defined(__linux__)
@@ -432,6 +514,103 @@ TEST_F(OptionsImplPlatformLinuxTest, AffinityTest4) {
 }
 
 #endif
+
+class TestFactory : public Config::TypedFactory {
+public:
+  ~TestFactory() override = default;
+  std::string category() const override { return "test"; }
+  std::string configType() override { return "google.protobuf.StringValue"; }
+  ProtobufTypes::MessagePtr createEmptyConfigProto() override {
+    return std::make_unique<ProtobufWkt::StringValue>();
+  }
+};
+
+class TestTestFactory : public TestFactory {
+public:
+  std::string name() const override { return "test"; }
+};
+
+class TestingFactory : public Config::TypedFactory {
+public:
+  ~TestingFactory() override = default;
+  std::string category() const override { return "testing"; }
+  std::string configType() override { return "google.protobuf.StringValue"; }
+  ProtobufTypes::MessagePtr createEmptyConfigProto() override {
+    return std::make_unique<ProtobufWkt::StringValue>();
+  }
+};
+
+class TestTestingFactory : public TestingFactory {
+public:
+  std::string name() const override { return "test"; }
+};
+
+TEST(DisableExtensions, DEPRECATED_FEATURE_TEST(IsDisabled)) {
+  TestTestFactory testTestFactory;
+  Registry::InjectFactoryCategory<TestFactory> testTestCategory(testTestFactory);
+  Registry::InjectFactory<TestFactory> testTestRegistration(testTestFactory, {"test-1", "test-2"});
+
+  TestTestingFactory testTestingFactory;
+  Registry::InjectFactoryCategory<TestingFactory> testTestingCategory(testTestingFactory);
+  Registry::InjectFactory<TestingFactory> testTestingRegistration(testTestingFactory,
+                                                                  {"test-1", "test-2"});
+
+  EXPECT_LOG_CONTAINS("warning", "failed to disable invalid extension name 'not.a.factory'",
+                      OptionsImpl::disableExtensions({"not.a.factory"}));
+
+  EXPECT_LOG_CONTAINS("warning", "failed to disable unknown extension 'no/such.factory'",
+                      OptionsImpl::disableExtensions({"no/such.factory"}));
+
+  EXPECT_NE(Registry::FactoryRegistry<TestFactory>::getFactory("test"), nullptr);
+  EXPECT_NE(Registry::FactoryRegistry<TestFactory>::getFactory("test-1"), nullptr);
+  EXPECT_NE(Registry::FactoryRegistry<TestFactory>::getFactory("test-2"), nullptr);
+  EXPECT_NE(Registry::FactoryRegistry<TestFactory>::getFactoryByType("google.protobuf.StringValue"),
+            nullptr);
+
+  EXPECT_NE(Registry::FactoryRegistry<TestingFactory>::getFactory("test"), nullptr);
+  EXPECT_NE(Registry::FactoryRegistry<TestingFactory>::getFactory("test-1"), nullptr);
+  EXPECT_NE(Registry::FactoryRegistry<TestingFactory>::getFactory("test-2"), nullptr);
+
+  OptionsImpl::disableExtensions({"test/test", "testing/test-2"});
+
+  // Simulate the initial construction of the type mappings.
+  testTestRegistration.resetTypeMappings();
+  testTestingRegistration.resetTypeMappings();
+
+  // When we disable an extension, all its aliases should also be disabled.
+  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test"), nullptr);
+  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-1"), nullptr);
+  EXPECT_EQ(Registry::FactoryRegistry<TestFactory>::getFactory("test-2"), nullptr);
+
+  // When we disable an extension, all its aliases should also be disabled.
+  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test"), nullptr);
+  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-1"), nullptr);
+  EXPECT_EQ(Registry::FactoryRegistry<TestingFactory>::getFactory("test-2"), nullptr);
+
+  // Typing map for TestingFactory should be constructed here after disabling
+  EXPECT_EQ(
+      Registry::FactoryRegistry<TestingFactory>::getFactoryByType("google.protobuf.StringValue"),
+      nullptr);
+}
+
+TEST(FactoryByTypeTest, EarlierVersionConfigType) {
+  envoy::config::filter::http::buffer::v2::Buffer v2_config;
+  auto factory = Registry::FactoryRegistry<Server::Configuration::NamedHttpFilterConfigFactory>::
+      getFactoryByType(v2_config.GetDescriptor()->full_name());
+  EXPECT_NE(factory, nullptr);
+  EXPECT_EQ(factory->name(), Extensions::HttpFilters::HttpFilterNames::get().Buffer);
+
+  envoy::extensions::filters::http::buffer::v3::Buffer v3_config;
+  factory = Registry::FactoryRegistry<Server::Configuration::NamedHttpFilterConfigFactory>::
+      getFactoryByType(v3_config.GetDescriptor()->full_name());
+  EXPECT_NE(factory, nullptr);
+  EXPECT_EQ(factory->name(), Extensions::HttpFilters::HttpFilterNames::get().Buffer);
+
+  ProtobufWkt::Any non_api_type;
+  factory = Registry::FactoryRegistry<Server::Configuration::NamedHttpFilterConfigFactory>::
+      getFactoryByType(non_api_type.GetDescriptor()->full_name());
+  EXPECT_EQ(factory, nullptr);
+}
 
 } // namespace
 } // namespace Envoy

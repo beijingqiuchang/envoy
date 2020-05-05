@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 
+#include "envoy/common/conn_pool.h"
 #include "envoy/common/pure.h"
 #include "envoy/event/deferred_deletable.h"
 #include "envoy/http/codec.h"
@@ -25,15 +26,7 @@ public:
   virtual void cancel() PURE;
 };
 
-/**
- * Reason that a pool stream could not be obtained.
- */
-enum class PoolFailureReason {
-  // A resource overflowed and policy prevented a new stream from being created.
-  Overflow,
-  // A connection failure took place and the stream could not be bound.
-  ConnectionFailure
-};
+using PoolFailureReason = ::Envoy::ConnectionPool::PoolFailureReason;
 
 /**
  * Pool callbacks invoked in the context of a newStream() call, either synchronously or
@@ -60,8 +53,7 @@ public:
    *             connection pools the description may be different each time this is called.
    * @param info supplies the stream info object associated with the upstream connection.
    */
-  virtual void onPoolReady(Http::StreamEncoder& encoder,
-                           Upstream::HostDescriptionConstSharedPtr host,
+  virtual void onPoolReady(RequestEncoder& encoder, Upstream::HostDescriptionConstSharedPtr host,
                            const StreamInfo::StreamInfo& info) PURE;
 };
 
@@ -119,7 +111,8 @@ public:
    * @warning Do not call cancel() from the callbacks, as the request is implicitly canceled when
    *          the callbacks are called.
    */
-  virtual Cancellable* newStream(Http::StreamDecoder& response_decoder, Callbacks& callbacks) PURE;
+  virtual Cancellable* newStream(Http::ResponseDecoder& response_decoder,
+                                 Callbacks& callbacks) PURE;
 
   /**
    * @return Upstream::HostDescriptionConstSharedPtr the host for which connections are pooled.

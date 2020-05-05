@@ -1,13 +1,15 @@
-#include "envoy/api/v2/eds.pb.h"
-#include "envoy/api/v2/endpoint/endpoint.pb.h"
-#include "envoy/api/v2/endpoint/load_report.pb.h"
-#include "envoy/service/load_stats/v2/lrs.pb.h"
-
-#include "common/config/resources.h"
+#include "envoy/config/bootstrap/v3/bootstrap.pb.h"
+#include "envoy/config/cluster/v3/cluster.pb.h"
+#include "envoy/config/core/v3/config_source.pb.h"
+#include "envoy/config/endpoint/v3/endpoint.pb.h"
+#include "envoy/config/endpoint/v3/endpoint_components.pb.h"
+#include "envoy/config/endpoint/v3/load_report.pb.h"
+#include "envoy/service/load_stats/v3/lrs.pb.h"
 
 #include "test/config/utility.h"
 #include "test/integration/http_integration.h"
 #include "test/test_common/network_utility.h"
+#include "test/test_common/resources.h"
 #include "test/test_common/utility.h"
 
 #include "gtest/gtest.h"
@@ -24,7 +26,7 @@ public:
     setDeterministic();
   }
 
-  void addEndpoint(envoy::api::v2::endpoint::LocalityLbEndpoints& locality_lb_endpoints,
+  void addEndpoint(envoy::config::endpoint::v3::LocalityLbEndpoints& locality_lb_endpoints,
                    uint32_t index, uint32_t& num_endpoints) {
     setUpstreamAddress(index + 1, *locality_lb_endpoints.add_lb_endpoints());
     ++num_endpoints;
@@ -50,7 +52,7 @@ public:
                                    const LocalityAssignment& p1_winter_upstreams,
                                    const LocalityAssignment& p1_dragon_upstreams) {
     uint32_t num_endpoints = 0;
-    envoy::api::v2::ClusterLoadAssignment cluster_load_assignment;
+    envoy::config::endpoint::v3::ClusterLoadAssignment cluster_load_assignment;
     // EDS service_name is set in cluster_0
     cluster_load_assignment.set_cluster_name("service_name_0");
 
@@ -105,10 +107,10 @@ public:
 
   void initialize() override {
     setUpstreamCount(upstream_endpoints_);
-    config_helper_.addConfigModifier([this](envoy::config::bootstrap::v2::Bootstrap& bootstrap) {
+    config_helper_.addConfigModifier([this](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
       // Setup load reporting and corresponding gRPC cluster.
       auto* loadstats_config = bootstrap.mutable_cluster_manager()->mutable_load_stats_config();
-      loadstats_config->set_api_type(envoy::api::v2::core::ApiConfigSource::GRPC);
+      loadstats_config->set_api_type(envoy::config::core::v3::ApiConfigSource::GRPC);
       loadstats_config->add_grpc_services()->mutable_envoy_grpc()->set_cluster_name("load_report");
       auto* load_report_cluster = bootstrap.mutable_static_resources()->add_clusters();
       load_report_cluster->MergeFrom(bootstrap.static_resources().clusters()[0]);
@@ -123,8 +125,7 @@ public:
       locality->set_sub_zone(sub_zone_);
       // Switch predefined cluster_0 to EDS filesystem sourcing.
       auto* cluster_0 = bootstrap.mutable_static_resources()->mutable_clusters(0);
-      cluster_0->mutable_hosts()->Clear();
-      cluster_0->set_type(envoy::api::v2::Cluster::EDS);
+      cluster_0->set_type(envoy::config::cluster::v3::Cluster::EDS);
       auto* eds_cluster_config = cluster_0->mutable_eds_cluster_config();
       eds_cluster_config->mutable_eds_config()->set_path(eds_helper_.eds_path());
       eds_cluster_config->set_service_name("service_name_0");
@@ -143,9 +144,9 @@ public:
   void initiateClientConnection() {
     auto conn = makeClientConnection(lookupPort("http"));
     codec_client_ = makeHttpConnection(std::move(conn));
-    Http::TestHeaderMapImpl headers{{":method", "POST"},       {":path", "/test/long/url"},
-                                    {":scheme", "http"},       {":authority", "host"},
-                                    {"x-lyft-user-id", "123"}, {"x-forwarded-for", "10.0.0.1"}};
+    Http::TestRequestHeaderMapImpl headers{
+        {":method", "POST"},    {":path", "/test/long/url"}, {":scheme", "http"},
+        {":authority", "host"}, {"x-lyft-user-id", "123"},   {"x-forwarded-for", "10.0.0.1"}};
     response_ = codec_client_->makeRequestWithBody(headers, request_size_);
   }
 
@@ -157,11 +158,20 @@ public:
     RELEASE_ASSERT(result, result.message());
   }
 
-  void
-  mergeLoadStats(envoy::service::load_stats::v2::LoadStatsRequest& loadstats_request,
-                 const envoy::service::load_stats::v2::LoadStatsRequest& local_loadstats_request) {
-    ASSERT(loadstats_request.cluster_stats_size() <= 1);
-    ASSERT(local_loadstats_request.cluster_stats_size() <= 1);
+  void mergeLoadStats(envoy::service::load_stats::v3::LoadStatsRequest& loadstats_request,
+                      envoy::service::load_stats::v3::LoadStatsRequest& local_loadstats_request) {
+    // Strip out "load_report" cluster, so that it doesn't interfere with the test.
+    for (auto it = local_loadstats_request.mutable_cluster_stats()->begin();
+         it != local_loadstats_request.mutable_cluster_stats()->end(); ++it) {
+      if (it->cluster_name() == "load_report") {
+        local_loadstats_request.mutable_cluster_stats()->erase(it);
+        break;
+      }
+    }
+
+    ASSERT_LE(loadstats_request.cluster_stats_size(), 1) << loadstats_request.DebugString();
+    ASSERT_LE(local_loadstats_request.cluster_stats_size(), 1)
+        << local_loadstats_request.DebugString();
 
     if (local_loadstats_request.cluster_stats_size() == 0) {
       return;
@@ -227,10 +237,11 @@ public:
     }
   }
 
-  void waitForLoadStatsRequest(
-      const std::vector<envoy::api::v2::endpoint::UpstreamLocalityStats>& expected_locality_stats,
-      uint64_t dropped = 0) {
-    Protobuf::RepeatedPtrField<envoy::api::v2::endpoint::ClusterStats> expected_cluster_stats;
+  void
+  waitForLoadStatsRequest(const std::vector<envoy::config::endpoint::v3::UpstreamLocalityStats>&
+                              expected_locality_stats,
+                          uint64_t dropped = 0) {
+    Protobuf::RepeatedPtrField<envoy::config::endpoint::v3::ClusterStats> expected_cluster_stats;
     if (!expected_locality_stats.empty() || dropped != 0) {
       auto* cluster_stats = expected_cluster_stats.Add();
       cluster_stats->set_cluster_name("cluster_0");
@@ -244,14 +255,19 @@ public:
           Protobuf::RepeatedPtrFieldBackInserter(cluster_stats->mutable_upstream_locality_stats()));
     }
 
-    envoy::service::load_stats::v2::LoadStatsRequest loadstats_request;
+    envoy::service::load_stats::v3::LoadStatsRequest loadstats_request;
     // Because multiple load stats may be sent while load in being sent (on slow machines), loop and
     // merge until all the expected load has been reported.
     do {
-      envoy::service::load_stats::v2::LoadStatsRequest local_loadstats_request;
+      envoy::service::load_stats::v3::LoadStatsRequest local_loadstats_request;
       AssertionResult result =
           loadstats_stream_->waitForGrpcMessage(*dispatcher_, local_loadstats_request);
       RELEASE_ASSERT(result, result.message());
+      // Check that "envoy.lrs.supports_send_all_clusters" client feature is set.
+      if (local_loadstats_request.has_node()) {
+        EXPECT_THAT(local_loadstats_request.node().client_features(),
+                    ::testing::ElementsAre("envoy.lrs.supports_send_all_clusters"));
+      }
       // Sanity check and clear the measured load report interval.
       for (auto& cluster_stats : *local_loadstats_request.mutable_cluster_stats()) {
         const uint32_t actual_load_report_interval_ms =
@@ -264,9 +280,6 @@ public:
         cluster_stats.mutable_load_report_interval()->Clear();
       }
       mergeLoadStats(loadstats_request, local_loadstats_request);
-      if (!loadstats_request.cluster_stats().empty()) {
-        ENVOY_LOG_MISC(debug, "HTD {}", loadstats_request.cluster_stats()[0].DebugString());
-      }
 
       EXPECT_EQ("POST", loadstats_stream_->headers().Method()->value().getStringView());
       EXPECT_EQ("/envoy.service.load_stats.v2.LoadReportingService/StreamLoadStats",
@@ -287,7 +300,7 @@ public:
     RELEASE_ASSERT(result, result.message());
 
     upstream_request_->encodeHeaders(
-        Http::TestHeaderMapImpl{{":status", std::to_string(response_code)}}, false);
+        Http::TestResponseHeaderMapImpl{{":status", std::to_string(response_code)}}, false);
     upstream_request_->encodeData(response_size_, true);
     response_->waitForEndStream();
 
@@ -300,23 +313,27 @@ public:
     EXPECT_EQ(response_size_, response_->body().size());
   }
 
-  void requestLoadStatsResponse(const std::vector<std::string>& clusters) {
-    envoy::service::load_stats::v2::LoadStatsResponse loadstats_response;
+  void requestLoadStatsResponse(const std::vector<std::string>& clusters,
+                                bool send_all_clusters = false) {
+    envoy::service::load_stats::v3::LoadStatsResponse loadstats_response;
     loadstats_response.mutable_load_reporting_interval()->MergeFrom(
         Protobuf::util::TimeUtil::MillisecondsToDuration(load_report_interval_ms_));
     for (const auto& cluster : clusters) {
       loadstats_response.add_clusters(cluster);
+    }
+    if (send_all_clusters) {
+      loadstats_response.set_send_all_clusters(true);
     }
     loadstats_stream_->sendGrpcMessage(loadstats_response);
     // Wait until the request has been received by Envoy.
     test_server_->waitForCounterGe("load_reporter.requests", ++load_requests_);
   }
 
-  envoy::api::v2::endpoint::UpstreamLocalityStats localityStats(const std::string& sub_zone,
-                                                                uint64_t success, uint64_t error,
-                                                                uint64_t active, uint64_t issued,
-                                                                uint32_t priority = 0) {
-    envoy::api::v2::endpoint::UpstreamLocalityStats locality_stats;
+  envoy::config::endpoint::v3::UpstreamLocalityStats localityStats(const std::string& sub_zone,
+                                                                   uint64_t success, uint64_t error,
+                                                                   uint64_t active, uint64_t issued,
+                                                                   uint32_t priority = 0) {
+    envoy::config::endpoint::v3::UpstreamLocalityStats locality_stats;
     auto* locality = locality_stats.mutable_locality();
     locality->set_region("some_region");
     locality->set_zone("zone_name");
@@ -395,7 +412,8 @@ TEST_P(LoadStatsIntegrationTest, Success) {
 
   // 33%/67% split between dragon/winter primary localities.
   updateClusterLoadAssignment({{0}}, {{1, 2}}, {}, {{4}});
-  requestLoadStatsResponse({"cluster_0"});
+  // Verify that send_all_clusters works.
+  requestLoadStatsResponse({}, true);
 
   for (uint32_t i = 0; i < 6; ++i) {
     sendAndReceiveUpstream((4 + i) % 3);
@@ -592,7 +610,7 @@ TEST_P(LoadStatsIntegrationTest, InProgress) {
 
 // Validate the load reports for dropped requests make sense.
 TEST_P(LoadStatsIntegrationTest, Dropped) {
-  config_helper_.addConfigModifier([](envoy::config::bootstrap::v2::Bootstrap& bootstrap) {
+  config_helper_.addConfigModifier([](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
     auto* cluster_0 = bootstrap.mutable_static_resources()->mutable_clusters(0);
     auto* thresholds = cluster_0->mutable_circuit_breakers()->add_thresholds();
     thresholds->mutable_max_pending_requests()->set_value(0);

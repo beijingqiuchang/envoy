@@ -6,6 +6,7 @@
 #include "envoy/stats/scope.h"
 #include "envoy/stats/timespan.h"
 
+#include "common/event/deferred_task.h"
 #include "common/network/connection_impl.h"
 #include "common/network/utility.h"
 #include "common/stats/timespan_impl.h"
@@ -15,9 +16,8 @@
 namespace Envoy {
 namespace Server {
 
-ConnectionHandlerImpl::ConnectionHandlerImpl(Event::Dispatcher& dispatcher,
-                                             const std::string& per_handler_stat_prefix)
-    : dispatcher_(dispatcher), per_handler_stat_prefix_(per_handler_stat_prefix + "."),
+ConnectionHandlerImpl::ConnectionHandlerImpl(Event::Dispatcher& dispatcher)
+    : dispatcher_(dispatcher), per_handler_stat_prefix_(dispatcher.name() + "."),
       disable_listeners_(false) {}
 
 void ConnectionHandlerImpl::incNumConnections() { ++num_handler_connections_; }
@@ -27,9 +27,19 @@ void ConnectionHandlerImpl::decNumConnections() {
   --num_handler_connections_;
 }
 
-void ConnectionHandlerImpl::addListener(Network::ListenerConfig& config) {
+void ConnectionHandlerImpl::addListener(absl::optional<uint64_t> overridden_listener,
+                                        Network::ListenerConfig& config) {
   ActiveListenerDetails details;
   if (config.listenSocketFactory().socketType() == Network::Address::SocketType::Stream) {
+    if (overridden_listener.has_value()) {
+      for (auto& listener : listeners_) {
+        if (listener.second.listener_->listenerTag() == overridden_listener) {
+          listener.second.tcp_listener_->get().updateListenerConfig(config);
+          return;
+        }
+      }
+      NOT_REACHED_GCOVR_EXCL_LINE;
+    }
     auto tcp_listener = std::make_unique<ActiveTcpListener>(*this, config);
     details.tcp_listener_ = *tcp_listener;
     details.listener_ = std::move(tcp_listener);
@@ -39,7 +49,7 @@ void ConnectionHandlerImpl::addListener(Network::ListenerConfig& config) {
         config.udpListenerFactory()->createActiveUdpListener(*this, dispatcher_, config);
   }
   if (disable_listeners_) {
-    details.listener_->listener()->disable();
+    details.listener_->pauseListening();
   }
   listeners_.emplace_back(config.listenSocketFactory().localAddress(), std::move(details));
 }
@@ -54,48 +64,75 @@ void ConnectionHandlerImpl::removeListeners(uint64_t listener_tag) {
   }
 }
 
+void ConnectionHandlerImpl::removeFilterChains(
+    uint64_t listener_tag, const std::list<const Network::FilterChain*>& filter_chains,
+    std::function<void()> completion) {
+  for (auto& listener : listeners_) {
+    if (listener.second.listener_->listenerTag() == listener_tag) {
+      listener.second.tcp_listener_->get().deferredRemoveFilterChains(filter_chains);
+      // Completion is deferred because the above removeFilterChains() may defer delete connection.
+      Event::DeferredTaskUtil::deferredRun(dispatcher_, std::move(completion));
+      return;
+    }
+  }
+  NOT_REACHED_GCOVR_EXCL_LINE;
+}
+
 void ConnectionHandlerImpl::stopListeners(uint64_t listener_tag) {
   for (auto& listener : listeners_) {
     if (listener.second.listener_->listenerTag() == listener_tag) {
-      listener.second.listener_->destroy();
+      listener.second.listener_->shutdownListener();
     }
   }
 }
 
 void ConnectionHandlerImpl::stopListeners() {
   for (auto& listener : listeners_) {
-    listener.second.listener_->destroy();
+    listener.second.listener_->shutdownListener();
   }
 }
 
 void ConnectionHandlerImpl::disableListeners() {
   disable_listeners_ = true;
   for (auto& listener : listeners_) {
-    listener.second.listener_->listener()->disable();
+    listener.second.listener_->pauseListening();
   }
 }
 
 void ConnectionHandlerImpl::enableListeners() {
   disable_listeners_ = false;
   for (auto& listener : listeners_) {
-    listener.second.listener_->listener()->enable();
+    listener.second.listener_->resumeListening();
   }
 }
 
 void ConnectionHandlerImpl::ActiveTcpListener::removeConnection(ActiveTcpConnection& connection) {
   ENVOY_CONN_LOG(debug, "adding to cleanup list", *connection.connection_);
-  ActiveTcpConnectionPtr removed = connection.removeFromList(connections_);
+  ActiveConnections& active_connections = connection.active_connections_;
+  ActiveTcpConnectionPtr removed = connection.removeFromList(active_connections.connections_);
   parent_.dispatcher_.deferredDelete(std::move(removed));
+  // Delete map entry only iff connections becomes empty.
+  if (active_connections.connections_.empty()) {
+    auto iter = connections_by_context_.find(&active_connections.filter_chain_);
+    ASSERT(iter != connections_by_context_.end());
+    // To cover the lifetime of every single connection, Connections need to be deferred deleted
+    // because the previously contained connection is deferred deleted.
+    parent_.dispatcher_.deferredDelete(std::move(iter->second));
+    // The erase will break the iteration over the connections_by_context_ during the deletion.
+    if (!is_deleting_) {
+      connections_by_context_.erase(iter);
+    }
+  }
 }
 
 ConnectionHandlerImpl::ActiveListenerImplBase::ActiveListenerImplBase(
-    Network::ConnectionHandler& parent, Network::ListenerConfig& config)
-    : stats_({ALL_LISTENER_STATS(POOL_COUNTER(config.listenerScope()),
-                                 POOL_GAUGE(config.listenerScope()),
-                                 POOL_HISTOGRAM(config.listenerScope()))}),
+    Network::ConnectionHandler& parent, Network::ListenerConfig* config)
+    : stats_({ALL_LISTENER_STATS(POOL_COUNTER(config->listenerScope()),
+                                 POOL_GAUGE(config->listenerScope()),
+                                 POOL_HISTOGRAM(config->listenerScope()))}),
       per_worker_stats_({ALL_PER_HANDLER_LISTENER_STATS(
-          POOL_COUNTER_PREFIX(config.listenerScope(), parent.statPrefix()),
-          POOL_GAUGE_PREFIX(config.listenerScope(), parent.statPrefix()))}),
+          POOL_COUNTER_PREFIX(config->listenerScope(), parent.statPrefix()),
+          POOL_GAUGE_PREFIX(config->listenerScope(), parent.statPrefix()))}),
       config_(config) {}
 
 ConnectionHandlerImpl::ActiveTcpListener::ActiveTcpListener(ConnectionHandlerImpl& parent,
@@ -109,14 +146,21 @@ ConnectionHandlerImpl::ActiveTcpListener::ActiveTcpListener(ConnectionHandlerImp
 ConnectionHandlerImpl::ActiveTcpListener::ActiveTcpListener(ConnectionHandlerImpl& parent,
                                                             Network::ListenerPtr&& listener,
                                                             Network::ListenerConfig& config)
-    : ConnectionHandlerImpl::ActiveListenerImplBase(parent, config), parent_(parent),
+    : ConnectionHandlerImpl::ActiveListenerImplBase(parent, &config), parent_(parent),
       listener_(std::move(listener)), listener_filters_timeout_(config.listenerFiltersTimeout()),
       continue_on_listener_filters_timeout_(config.continueOnListenerFiltersTimeout()) {
   config.connectionBalancer().registerHandler(*this);
 }
 
+void ConnectionHandlerImpl::ActiveTcpListener::updateListenerConfig(
+    Network::ListenerConfig& config) {
+  ENVOY_LOG(trace, "replacing listener ", config_->listenerTag(), " by ", config.listenerTag());
+  config_ = &config;
+}
+
 ConnectionHandlerImpl::ActiveTcpListener::~ActiveTcpListener() {
-  config_.connectionBalancer().unregisterHandler(*this);
+  is_deleting_ = true;
+  config_->connectionBalancer().unregisterHandler(*this);
 
   // Purge sockets that have not progressed to connections. This should only happen when
   // a listener filter stops iteration and never resumes.
@@ -125,10 +169,13 @@ ConnectionHandlerImpl::ActiveTcpListener::~ActiveTcpListener() {
     parent_.dispatcher_.deferredDelete(std::move(removed));
   }
 
-  while (!connections_.empty()) {
-    connections_.front()->connection_->close(Network::ConnectionCloseType::NoFlush);
+  for (auto& chain_and_connections : connections_by_context_) {
+    ASSERT(chain_and_connections.second != nullptr);
+    auto& connections = chain_and_connections.second->connections_;
+    while (!connections.empty()) {
+      connections.front()->connection_->close(Network::ConnectionCloseType::NoFlush);
+    }
   }
-
   parent_.dispatcher_.clearDeferredDeleteList();
 
   // By the time a listener is destroyed, in the common case, there should be no connections.
@@ -275,7 +322,7 @@ void ConnectionHandlerImpl::ActiveTcpSocket::newConnection() {
 }
 
 void ConnectionHandlerImpl::ActiveTcpListener::onAccept(Network::ConnectionSocketPtr&& socket) {
-  onAcceptWorker(std::move(socket), config_.handOffRestoredDestinationConnections(), false);
+  onAcceptWorker(std::move(socket), config_->handOffRestoredDestinationConnections(), false);
 }
 
 void ConnectionHandlerImpl::ActiveTcpListener::onAcceptWorker(
@@ -283,7 +330,7 @@ void ConnectionHandlerImpl::ActiveTcpListener::onAcceptWorker(
     bool rebalanced) {
   if (!rebalanced) {
     Network::BalancedConnectionHandler& target_handler =
-        config_.connectionBalancer().pickTargetHandler(*this);
+        config_->connectionBalancer().pickTargetHandler(*this);
     if (&target_handler != this) {
       target_handler.post(std::move(socket));
       return;
@@ -294,7 +341,7 @@ void ConnectionHandlerImpl::ActiveTcpListener::onAcceptWorker(
                                                          hand_off_restored_destination_connections);
 
   // Create and run the filters
-  config_.filterChainFactory().createListenerFilterChain(*active_socket);
+  config_->filterChainFactory().createListenerFilterChain(*active_socket);
   active_socket->continueFilterChain(true);
 
   // Move active_socket to the sockets_ list if filter iteration needs to continue later.
@@ -305,25 +352,45 @@ void ConnectionHandlerImpl::ActiveTcpListener::onAcceptWorker(
   }
 }
 
+namespace {
+void emitLogs(Network::ListenerConfig& config, StreamInfo::StreamInfo& stream_info) {
+  stream_info.onRequestComplete();
+  for (const auto& access_log : config.accessLogs()) {
+    access_log->log(nullptr, nullptr, nullptr, stream_info);
+  }
+}
+} // namespace
+
 void ConnectionHandlerImpl::ActiveTcpListener::newConnection(
     Network::ConnectionSocketPtr&& socket) {
+  auto stream_info = std::make_unique<StreamInfo::StreamInfoImpl>(parent_.dispatcher_.timeSource());
+  stream_info->setDownstreamLocalAddress(socket->localAddress());
+  stream_info->setDownstreamRemoteAddress(socket->remoteAddress());
+  stream_info->setDownstreamDirectRemoteAddress(socket->directRemoteAddress());
+
   // Find matching filter chain.
-  const auto filter_chain = config_.filterChainManager().findFilterChain(*socket);
+  const auto filter_chain = config_->filterChainManager().findFilterChain(*socket);
   if (filter_chain == nullptr) {
     ENVOY_LOG(debug, "closing connection: no matching filter chain found");
     stats_.no_filter_chain_match_.inc();
+    stream_info->setResponseFlag(StreamInfo::ResponseFlag::NoRouteFound);
+    stream_info->setResponseCodeDetails(StreamInfo::ResponseCodeDetails::get().FilterChainNotFound);
+    emitLogs(*config_, *stream_info);
     socket->close();
     return;
   }
 
   auto transport_socket = filter_chain->transportSocketFactory().createTransportSocket(nullptr);
-  ActiveTcpConnectionPtr active_connection(new ActiveTcpConnection(
-      *this,
-      parent_.dispatcher_.createServerConnection(std::move(socket), std::move(transport_socket)),
-      parent_.dispatcher_.timeSource()));
-  active_connection->connection_->setBufferLimits(config_.perConnectionBufferLimitBytes());
+  stream_info->setDownstreamSslConnection(transport_socket->ssl());
+  auto& active_connections = getOrCreateActiveConnections(*filter_chain);
+  auto server_conn_ptr = parent_.dispatcher_.createServerConnection(
+      std::move(socket), std::move(transport_socket), *stream_info);
+  ActiveTcpConnectionPtr active_connection(
+      new ActiveTcpConnection(active_connections, std::move(server_conn_ptr),
+                              parent_.dispatcher_.timeSource(), std::move(stream_info)));
+  active_connection->connection_->setBufferLimits(config_->perConnectionBufferLimitBytes());
 
-  const bool empty_filter_chain = !config_.filterChainFactory().createNetworkFilterChain(
+  const bool empty_filter_chain = !config_->filterChainFactory().createNetworkFilterChain(
       *active_connection->connection_, filter_chain->networkFilterFactories());
   if (empty_filter_chain) {
     ENVOY_CONN_LOG(debug, "closing connection: no filters", *active_connection->connection_);
@@ -334,8 +401,41 @@ void ConnectionHandlerImpl::ActiveTcpListener::newConnection(
   if (active_connection->connection_->state() != Network::Connection::State::Closed) {
     ENVOY_CONN_LOG(debug, "new connection", *active_connection->connection_);
     active_connection->connection_->addConnectionCallbacks(*active_connection);
-    active_connection->moveIntoList(std::move(active_connection), connections_);
+    active_connection->moveIntoList(std::move(active_connection), active_connections.connections_);
   }
+}
+
+ConnectionHandlerImpl::ActiveConnections&
+ConnectionHandlerImpl::ActiveTcpListener::getOrCreateActiveConnections(
+    const Network::FilterChain& filter_chain) {
+  ActiveConnectionsPtr& connections = connections_by_context_[&filter_chain];
+  if (connections == nullptr) {
+    connections = std::make_unique<ConnectionHandlerImpl::ActiveConnections>(*this, filter_chain);
+  }
+  return *connections;
+}
+
+void ConnectionHandlerImpl::ActiveTcpListener::deferredRemoveFilterChains(
+    const std::list<const Network::FilterChain*>& draining_filter_chains) {
+  // Need to recover the original deleting state.
+  const bool was_deleting = is_deleting_;
+  is_deleting_ = true;
+  for (const auto* filter_chain : draining_filter_chains) {
+    auto iter = connections_by_context_.find(filter_chain);
+    if (iter == connections_by_context_.end()) {
+      // It is possible when listener is stopping.
+    } else {
+      auto& connections = iter->second->connections_;
+      while (!connections.empty()) {
+        connections.front()->connection_->close(Network::ConnectionCloseType::NoFlush);
+      }
+      // Since is_deleting_ is on, we need to manually remove the map value and drive the iterator.
+      // Defer delete connection container to avoid race condition in destroying connection.
+      parent_.dispatcher_.deferredDelete(std::move(iter->second));
+      iter = connections_by_context_.erase(iter);
+    }
+  }
+  is_deleting_ = was_deleting;
 }
 
 namespace {
@@ -354,57 +454,71 @@ void ConnectionHandlerImpl::ActiveTcpListener::post(Network::ConnectionSocketPtr
   RebalancedSocketSharedPtr socket_to_rebalance = std::make_shared<RebalancedSocket>();
   socket_to_rebalance->socket = std::move(socket);
 
-  parent_.dispatcher_.post([socket_to_rebalance, tag = config_.listenerTag(), &parent = parent_]() {
-    // TODO(mattklein123): We should probably use a hash table here to lookup the tag instead of
-    // iterating through the listener list.
-    for (const auto& listener : parent.listeners_) {
-      if (listener.second.listener_->listener() != nullptr &&
-          listener.second.listener_->listenerTag() == tag) {
-        // If the tag matches this must be a TCP listener.
-        ASSERT(listener.second.tcp_listener_.has_value());
-        listener.second.tcp_listener_.value().get().onAcceptWorker(
-            std::move(socket_to_rebalance->socket),
-            listener.second.tcp_listener_.value()
-                .get()
-                .config_.handOffRestoredDestinationConnections(),
-            true);
-        return;
-      }
-    }
-  });
+  parent_.dispatcher_.post(
+      [socket_to_rebalance, tag = config_->listenerTag(), &parent = parent_]() {
+        // TODO(mattklein123): We should probably use a hash table here to lookup the tag instead of
+        // iterating through the listener list.
+        for (const auto& listener : parent.listeners_) {
+          if (listener.second.listener_->listener() != nullptr &&
+              listener.second.listener_->listenerTag() == tag) {
+            // If the tag matches this must be a TCP listener.
+            ASSERT(listener.second.tcp_listener_.has_value());
+            listener.second.tcp_listener_.value().get().onAcceptWorker(
+                std::move(socket_to_rebalance->socket),
+                listener.second.tcp_listener_.value()
+                    .get()
+                    .config_->handOffRestoredDestinationConnections(),
+                true);
+            return;
+          }
+        }
+      });
+}
+
+ConnectionHandlerImpl::ActiveConnections::ActiveConnections(
+    ConnectionHandlerImpl::ActiveTcpListener& listener, const Network::FilterChain& filter_chain)
+    : listener_(listener), filter_chain_(filter_chain) {}
+
+ConnectionHandlerImpl::ActiveConnections::~ActiveConnections() {
+  // connections should be defer deleted already.
+  ASSERT(connections_.empty());
 }
 
 ConnectionHandlerImpl::ActiveTcpConnection::ActiveTcpConnection(
-    ActiveTcpListener& listener, Network::ConnectionPtr&& new_connection, TimeSource& time_source)
-    : listener_(listener), connection_(std::move(new_connection)),
+    ActiveConnections& active_connections, Network::ConnectionPtr&& new_connection,
+    TimeSource& time_source, std::unique_ptr<StreamInfo::StreamInfo>&& stream_info)
+    : stream_info_(std::move(stream_info)), active_connections_(active_connections),
+      connection_(std::move(new_connection)),
       conn_length_(new Stats::HistogramCompletableTimespanImpl(
-          listener_.stats_.downstream_cx_length_ms_, time_source)) {
+          active_connections_.listener_.stats_.downstream_cx_length_ms_, time_source)) {
   // We just universally set no delay on connections. Theoretically we might at some point want
   // to make this configurable.
   connection_->noDelay(true);
 
-  listener_.stats_.downstream_cx_total_.inc();
-  listener_.stats_.downstream_cx_active_.inc();
-  listener_.per_worker_stats_.downstream_cx_total_.inc();
-  listener_.per_worker_stats_.downstream_cx_active_.inc();
+  active_connections_.listener_.stats_.downstream_cx_total_.inc();
+  active_connections_.listener_.stats_.downstream_cx_active_.inc();
+  active_connections_.listener_.per_worker_stats_.downstream_cx_total_.inc();
+  active_connections_.listener_.per_worker_stats_.downstream_cx_active_.inc();
 
   // Active connections on the handler (not listener). The per listener connections have already
   // been incremented at this point either via the connection balancer or in the socket accept
   // path if there is no configured balancer.
-  ++listener_.parent_.num_handler_connections_;
+  ++active_connections_.listener_.parent_.num_handler_connections_;
 }
 
 ConnectionHandlerImpl::ActiveTcpConnection::~ActiveTcpConnection() {
-  listener_.stats_.downstream_cx_active_.dec();
-  listener_.stats_.downstream_cx_destroy_.inc();
-  listener_.per_worker_stats_.downstream_cx_active_.dec();
+  emitLogs(*active_connections_.listener_.config_, *stream_info_);
+
+  active_connections_.listener_.stats_.downstream_cx_active_.dec();
+  active_connections_.listener_.stats_.downstream_cx_destroy_.inc();
+  active_connections_.listener_.per_worker_stats_.downstream_cx_active_.dec();
   conn_length_->complete();
 
   // Active listener connections (not handler).
-  listener_.decNumConnections();
+  active_connections_.listener_.decNumConnections();
 
   // Active handler connections (not listener).
-  listener_.parent_.decNumConnections();
+  active_connections_.listener_.parent_.decNumConnections();
 }
 
 ActiveUdpListener::ActiveUdpListener(Network::ConnectionHandler& parent,
@@ -417,20 +531,22 @@ ActiveUdpListener::ActiveUdpListener(Network::ConnectionHandler& parent,
 ActiveUdpListener::ActiveUdpListener(Network::ConnectionHandler& parent,
                                      Network::UdpListenerPtr&& listener,
                                      Network::ListenerConfig& config)
-    : ConnectionHandlerImpl::ActiveListenerImplBase(parent, config),
+    : ConnectionHandlerImpl::ActiveListenerImplBase(parent, &config),
       udp_listener_(std::move(listener)), read_filter_(nullptr) {
   // Create the filter chain on creating a new udp listener
-  config_.filterChainFactory().createUdpListenerFilterChain(*this, *this);
+  config_->filterChainFactory().createUdpListenerFilterChain(*this, *this);
 
   // If filter is nullptr, fail the creation of the listener
   if (read_filter_ == nullptr) {
     throw Network::CreateListenerException(
         fmt::format("Cannot create listener as no read filter registered for the udp listener: {} ",
-                    config_.name()));
+                    config_->name()));
   }
 }
 
 void ActiveUdpListener::onData(Network::UdpRecvData& data) { read_filter_->onData(data); }
+
+void ActiveUdpListener::onReadReady() {}
 
 void ActiveUdpListener::onWriteReady(const Network::Socket&) {
   // TODO(sumukhs): This is not used now. When write filters are implemented, this is a
@@ -438,11 +554,8 @@ void ActiveUdpListener::onWriteReady(const Network::Socket&) {
   // data
 }
 
-void ActiveUdpListener::onReceiveError(const Network::UdpListenerCallbacks::ErrorCode&,
-                                       Api::IoError::IoErrorCode) {
-  // TODO(sumukhs): Determine what to do on receive error.
-  // Would the filters need to know on error? Can't foresee a scenario where they
-  // would take an action
+void ActiveUdpListener::onReceiveError(Api::IoError::IoErrorCode error_code) {
+  read_filter_->onReceiveError(error_code);
 }
 
 void ActiveUdpListener::addReadFilter(Network::UdpListenerReadFilterPtr&& filter) {

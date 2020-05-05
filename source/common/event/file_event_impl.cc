@@ -10,7 +10,7 @@
 namespace Envoy {
 namespace Event {
 
-FileEventImpl::FileEventImpl(DispatcherImpl& dispatcher, int fd, FileReadyCb cb,
+FileEventImpl::FileEventImpl(DispatcherImpl& dispatcher, os_fd_t fd, FileReadyCb cb,
                              FileTriggerType trigger, uint32_t events)
     : cb_(cb), fd_(fd), trigger_(trigger) {
 #ifdef WIN32
@@ -62,8 +62,12 @@ void FileEventImpl::assignEvents(uint32_t events, event_base* base) {
           events |= FileReadyType::Closed;
         }
 
-        ASSERT(events);
-        event->cb_(events);
+        // TODO(htuch): this should be ASSERT(events), but
+        // https://github.com/libevent/libevent/issues/984 seems to be producing unexpected
+        // behavior. The ASSERT should be restored once this issue is resolved.
+        if (events) {
+          event->cb_(events);
+        }
       },
       this);
 }

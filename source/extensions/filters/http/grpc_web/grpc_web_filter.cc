@@ -38,7 +38,10 @@ const absl::flat_hash_set<std::string>& GrpcWebFilter::gRpcWebContentTypes() con
   return *types;
 }
 
-bool GrpcWebFilter::isGrpcWebRequest(const Http::HeaderMap& headers) {
+bool GrpcWebFilter::isGrpcWebRequest(const Http::RequestHeaderMap& headers) {
+  if (!headers.Path()) {
+    return false;
+  }
   const Http::HeaderEntry* content_type = headers.ContentType();
   if (content_type != nullptr) {
     return gRpcWebContentTypes().count(content_type->value().getStringView()) > 0;
@@ -48,7 +51,7 @@ bool GrpcWebFilter::isGrpcWebRequest(const Http::HeaderMap& headers) {
 
 // Implements StreamDecoderFilter.
 // TODO(fengli): Implements the subtypes of gRPC-Web content-type other than proto, like +json, etc.
-Http::FilterHeadersStatus GrpcWebFilter::decodeHeaders(Http::HeaderMap& headers, bool) {
+Http::FilterHeadersStatus GrpcWebFilter::decodeHeaders(Http::RequestHeaderMap& headers, bool) {
   const Http::HeaderEntry* content_type = headers.ContentType();
   if (!isGrpcWebRequest(headers)) {
     return Http::FilterHeadersStatus::Continue;
@@ -136,7 +139,7 @@ Http::FilterDataStatus GrpcWebFilter::decodeData(Buffer::Instance& data, bool en
 }
 
 // Implements StreamEncoderFilter.
-Http::FilterHeadersStatus GrpcWebFilter::encodeHeaders(Http::HeaderMap& headers, bool) {
+Http::FilterHeadersStatus GrpcWebFilter::encodeHeaders(Http::ResponseHeaderMap& headers, bool) {
   if (!is_grpc_web_request_) {
     return Http::FilterHeadersStatus::Continue;
   }
@@ -186,7 +189,7 @@ Http::FilterDataStatus GrpcWebFilter::encodeData(Buffer::Instance& data, bool) {
   return Http::FilterDataStatus::Continue;
 }
 
-Http::FilterTrailersStatus GrpcWebFilter::encodeTrailers(Http::HeaderMap& trailers) {
+Http::FilterTrailersStatus GrpcWebFilter::encodeTrailers(Http::ResponseTrailerMap& trailers) {
   if (!is_grpc_web_request_) {
     return Http::FilterTrailersStatus::Continue;
   }
@@ -208,6 +211,9 @@ Http::FilterTrailersStatus GrpcWebFilter::encodeTrailers(Http::HeaderMap& traile
         return Http::HeaderMap::Iterate::Continue;
       },
       &temp);
+
+  // Clear out the trailers so they don't get added since it is now in the body
+  trailers.clear();
   Buffer::OwnedImpl buffer;
   // Adds the trailers frame head.
   buffer.add(&GRPC_WEB_TRAILER, 1);
@@ -224,16 +230,16 @@ Http::FilterTrailersStatus GrpcWebFilter::encodeTrailers(Http::HeaderMap& traile
   return Http::FilterTrailersStatus::Continue;
 }
 
-void GrpcWebFilter::setupStatTracking(const Http::HeaderMap& headers) {
+void GrpcWebFilter::setupStatTracking(const Http::RequestHeaderMap& headers) {
   cluster_ = decoder_callbacks_->clusterInfo();
   if (!cluster_) {
     return;
   }
-  request_names_ = context_.resolveServiceAndMethod(headers.Path());
+  request_stat_names_ = context_.resolveDynamicServiceAndMethod(headers.Path());
 }
 
-void GrpcWebFilter::chargeStat(const Http::HeaderMap& headers) {
-  context_.chargeStat(*cluster_, Grpc::Context::Protocol::GrpcWeb, *request_names_,
+void GrpcWebFilter::chargeStat(const Http::ResponseHeaderOrTrailerMap& headers) {
+  context_.chargeStat(*cluster_, Grpc::Context::Protocol::GrpcWeb, *request_stat_names_,
                       headers.GrpcStatus());
 }
 

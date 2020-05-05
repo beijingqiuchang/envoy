@@ -24,6 +24,7 @@ envoy_extension_cc_test(
         "//test/mocks/server:server_mocks",
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:environment_lib",
+        "@envoy_api//envoy/extensions/filters/http/squash/v3:pkg_cc_proto",
     ],
 )
 
@@ -31,9 +32,11 @@ envoy_extension_cc_test(
     name = "squash_filter_integration_test",
     srcs = ["squash_filter_integration_test.cc"],
     extension_name = "envoy.filters.http.squash",
+    tags = ["fails_on_windows"],
     deps = [
         "//source/extensions/filters/http/squash:config",
         "//test/integration:http_integration_lib",
+        "@envoy_api//envoy/config/bootstrap/v3:pkg_cc_proto",
     ],
 )
 
@@ -45,6 +48,6 @@ envoy_extension_cc_test(
         "//source/extensions/filters/http/squash:config",
         "//test/mocks/server:server_mocks",
         "//test/test_common:utility_lib",
-        "@envoy_api//envoy/config/filter/http/squash/v2:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/squash/v3:pkg_cc_proto",
     ],
 )
